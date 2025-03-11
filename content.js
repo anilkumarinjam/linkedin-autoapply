@@ -95,11 +95,36 @@ async function fillApplicationForm() {
     }
     
     // Handle radio buttons - restrict to modal
-    const radioGroups = modalContainer.querySelectorAll('fieldset');
-    for (const group of radioGroups) {
-        const radios = group.querySelectorAll('input[type="radio"]');
-        if (radios.length > 0 && !Array.from(radios).some(r => r.checked)) {
-            // Try to find "Yes" option first
+// Handle radio buttons - restrict to modal
+const radioGroups = modalContainer.querySelectorAll('fieldset');
+for (const group of radioGroups) {
+    const radios = group.querySelectorAll('input[type="radio"]');
+    if (radios.length > 0 && !Array.from(radios).some(r => r.checked)) {
+        // Get the question text to check for sponsorship
+        const questionText = group.textContent.toLowerCase() || '';
+        const isSponsorship = questionText.includes('sponsor') || 
+                              questionText.includes('sponsorship') || 
+                              questionText.includes('work authorization') ||
+                              questionText.includes('visa');
+        
+        if (isSponsorship) {
+            // For sponsorship questions, try to find "No" option
+            console.log("📝 Sponsorship question detected, selecting No");
+            const noOption = Array.from(radios).find(r => 
+                r.value.toLowerCase() === "no" || 
+                r.id.toLowerCase().includes("no")
+            );
+            
+            if (noOption) {
+                noOption.click();
+            } else {
+                // If can't find explicit "No", choose the last option
+                // (often "No" is the second option)
+                radios[radios.length - 1].click();
+            }
+        } else {
+            // For all other questions, try to find "Yes" option
+            console.log("📝 Standard question, selecting Yes");
             const yesOption = Array.from(radios).find(r => 
                 r.value.toLowerCase() === "yes" || 
                 r.id.toLowerCase().includes("yes")
@@ -108,11 +133,14 @@ async function fillApplicationForm() {
             if (yesOption) {
                 yesOption.click();
             } else {
+                // If can't find explicit "Yes", choose the first option
                 radios[0].click();
             }
-            await delay(300);
         }
+        
+        await delay(300);
     }
+}
     
     // Handle checkboxes - restrict to modal
     const checkboxes = modalContainer.querySelectorAll('input[type="checkbox"]:not(:checked)');
@@ -125,6 +153,10 @@ async function fillApplicationForm() {
 }
 
 async function startAutomation() {
+    if (!isRunning) {
+        console.log("⏹️ Automation is stopped, exiting...");
+        return;
+    }
     console.log("🚀 Starting LinkedIn automation");
     
     try {
@@ -234,9 +266,13 @@ async function startAutomation() {
     }
     
     // Schedule the next job after a delay
-    setTimeout(() => {
-        startAutomation();
-    }, 5000);
+    if (isRunning) {
+        setTimeout(() => {
+            startAutomation();
+        }, 5000);
+    } else {
+        console.log("⏹️ Automation stopped, not scheduling next job");
+    }
 }
 
 async function processApplicationSteps() {
