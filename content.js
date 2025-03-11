@@ -1,18 +1,27 @@
 console.log("✅ LinkedIn Auto Apply content script loaded");
 
 // Listen for messages from popup
+// Add this near the top with your other listener code
+let isRunning = false;
+
+// Listen for messages from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log("Message received:", message);
     
     if (message.action === "start") {
         console.log("🚀 Starting LinkedIn automation");
+        isRunning = true;
         startAutomation();
         sendResponse({ status: "Automation started" });
     } else if (message.action === "stop") {
         console.log("⏹️ Stopping LinkedIn automation");
+        isRunning = false;
         // Stop any ongoing processes
         window.location.reload();
         sendResponse({ status: "Automation stopped" });
+    } else if (message.action === "status") {
+        // Report current status
+        sendResponse({ isRunning });
     }
     
     return true; // Indicates async response
