@@ -56,7 +56,7 @@ function updateStatus() {
                         const stopBtn = document.getElementById("stop");
                         
                         if (response.isRunning) {
-                            statusEl.innerText = "Running";
+                            statusEl.innerText = "...Running";
                             statusEl.style.color = "#0077b5";
                             startBtn.disabled = true;
                             stopBtn.disabled = false;

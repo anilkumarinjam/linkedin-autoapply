@@ -1,6 +1,7 @@
 console.log("✅ LinkedIn Auto Apply content script loaded");
 
 let isRunning = false;
+let stillApplying = false;
 let fab = null; // Declare fab globally so it can be accessed from anywhere
 
 window.addEventListener("load", () => {
@@ -12,15 +13,14 @@ window.addEventListener("load", () => {
   // Create the FAB
   fab = document.createElement("button");
   fab.id = "autoApplyFab";
-  fab.textContent = "Start AI AutoApply";
   fab.style.position = "fixed";
   fab.style.right = "0px";
   fab.style.top = "400px";
   fab.style.width = "55px";
   fab.style.height = "55px";
   fab.style.padding = "10px";
-  fab.style.background = "linear-gradient(135deg, #1E88E5, #0D47A1)";
-  fab.style.borderRadius = "2px";
+  fab.style.background = "linear-gradient(135deg,rgb(128, 54, 231), #0D47A1)";
+  fab.style.borderRadius = "4px";
   // Text styling
   fab.style.color = "#fff";
   fab.style.fontSize = "8px";
@@ -38,7 +38,7 @@ window.addEventListener("load", () => {
   // Border and other styling
   fab.style.border = "none";
   fab.style.outline = "none";
-  fab.style.zIndex = "9999";
+  fab.style.zIndex = "100000";
   fab.style.cursor = "pointer";
   fab.style.transition = "all 0.3s ease";
   // Hover effect
@@ -60,6 +60,18 @@ window.addEventListener("load", () => {
       "inset 0 1px 0 rgba(255,255,255,0.2)";
   });
   
+  // Add the image to the FAB
+  const fabImage = document.createElement("img");
+  fabImage.src = chrome.runtime.getURL("icons/ai_auto.png");
+  fabImage.style.width = "180%";
+  fabImage.style.height = "160%";
+  fabImage.style.objectFit = "contain";
+  fabImage.style.pointerEvents = "none"; // Ensure the image doesn't interfere with button clicks
+  fabImage.style.paddingRight = "10px"; // Add padding to the right
+  fabImage.style.paddingBottom="10px";
+  fabImage.style.transform = "translateX(-8px) scale(1.2)";
+  fab.appendChild(fabImage);
+  
   document.body.appendChild(fab);
 
   let isDragging = false;
@@ -72,7 +84,7 @@ window.addEventListener("load", () => {
       localStorage.removeItem("shouldStartAfterRedirect");
     
       // Delay starting automation to ensure the page is fully loaded
-      setTimeout(() => clickFirstJobCardAndStart(true), 3000);
+      setTimeout(() => clickJobCardWithViewName(), 2000);
     }
   }
 
@@ -97,162 +109,103 @@ window.addEventListener("load", () => {
     // Only handle click if we weren't dragging
     if (isDragging) return;
     
-    if (!window.location.href.includes("/jobs/")) {
-      // If not on jobs page, set flag and redirect
-      localStorage.setItem("shouldStartAfterRedirect", "true");
-      console.log("📍 Not on jobs page, redirecting to job search URL");
-      window.location.href = linkedInJobsUrl;
-    } else {
-      // Already on jobs page
-      if (!isRunning) {
-        console.log("🚀 Starting automation on jobs page");
-        clickFirstJobCardAndStart(false);
-      } else {
-        console.log("⏹️ Stopping automation");
-        isRunning = false;
-        updateFabUI();
-      }
+    const currentUrl = window.location.href;
+    if (!currentUrl.includes("/jobs")) {
+        // If not on jobs page, set flag and redirect
+        localStorage.setItem("shouldStartAfterRedirect", "true");
+        console.log("📍 Not on jobs page, redirecting to job search URL");
+        window.location.href = linkedInJobsUrl;
+    }  else {
+        // Already on jobs page or subpage
+        if (!isRunning) {
+            console.log("🚀 Starting automation on jobs page");
+            isRunning = true;
+            updateFabUI();
+            clickJobCardWithViewName();
+        } else {
+            console.log("⏹️ Stopping automation");
+            isRunning = false;
+            stillApplying = false; // Ensure stillApplying is also set to false
+            updateFabUI();
+        }
     }
-  });
+ });
 });
 
-// Helper function to click first job card and start automation
-async function clickFirstJobCardAndStart(afterRedirect) {
-    console.log("🎯 Attempting to find and click the first job card");
+// Update the updateFabUI function as well
+function updateFabUI() {
+    if (!fab) return;
+    
+    if (isRunning) {
+      fab.style.background = "linear-gradient(135deg, #F44336, #B71C1C)";
+      fab.style.boxShadow = 
+        "0 3px 10px rgba(244,67,54,0.3), " +
+        "0 8px 20px rgba(0,0,0,0.15), " +
+        "0 0 0 1px rgba(255,255,255,0.1), " +
+        "inset 0 1px 0 rgba(255,255,255,0.2)";
+    } else {
+      fab.style.background = "linear-gradient(135deg, #1E88E5, #0D47A1)";
+      fab.style.boxShadow = 
+        "0 3px 10px rgba(0,119,181,0.3), " +
+        "0 8px 20px rgba(0,0,0,0.15), " +
+        "0 0 0 1px rgba(255,255,255,0.1), " +
+        "inset 0 1px 0 rgba(255,255,255,0.2)";
+    }
+}
+
+async function clickJobCardWithViewName() {
+    console.log("🎯 Attempting to find and click the first job card with fh-webext-job-display='true'");
     
     // Wait for the page to fully load and stabilize
     await delay(3000);
     
-    // NEW APPROACH: Look specifically for elements with the exact class pattern you found
-    console.log("Looking for job cards with specific LinkedIn classes...");
+    // Find the first job card with the 'fh-webext-job-display="true"' attribute
+    const jobCards = document.querySelectorAll('li[fh-webext-job-display="true"]');
     
-    // Function to find elements that contain all these class name fragments
-    function findElementsWithClassPatterns(classPatterns) {
-        const allElements = document.querySelectorAll('div, li');
-        return Array.from(allElements).filter(el => {
-            if (!el.className || typeof el.className !== 'string') return false;
-            return classPatterns.every(pattern => el.className.includes(pattern));
-        });
-    }
-    
-    // Look for elements with these class patterns
-    const jobCardClassPatterns = [
-        "job-card-container",
-        "job-card-list",
-        "clickable"
-    ];
-    
-    const jobCardsWithPattern = findElementsWithClassPatterns(jobCardClassPatterns);
-    console.log(`Found ${jobCardsWithPattern.length} job cards with specific class patterns`);
-    
-    if (jobCardsWithPattern.length > 0) {
-        console.log("✅ Found job card with exact pattern match!");
-        const firstCard = jobCardsWithPattern[0];
+    if (jobCards.length > 0) {
+        console.log("✅ Found job card with fh-webext-job-display='true'");
+        const firstCard = jobCards[0];
         
-        // Debug information
-        console.log(`Selected job card classes: ${firstCard.className}`);
-        console.log(`Dimensions: ${firstCard.offsetWidth}x${firstCard.offsetHeight}`);
-        
-        // Highlight it briefly
+        // Highlight it briefly for debugging
         const originalStyle = firstCard.getAttribute("style") || "";
         firstCard.setAttribute("style", `${originalStyle}; border: 3px solid red !important; background-color: rgba(255,255,0,0.2) !important;`);
         
         await delay(500); // Show highlight briefly
         firstCard.setAttribute("style", originalStyle);
         
-        // Try to click it with our enhanced click method
+        // Click the job card
         await clickJobCard(firstCard);
         return;
-    }
-    
-    // FALLBACK 1: If specific pattern not found, look for any element with "job-card-container" class
-    console.log("⚠️ Specific pattern not found, looking for any job-card-container");
-    const simpleJobCards = document.querySelectorAll('div.job-card-container, li.job-card-container');
-    
-    if (simpleJobCards.length > 0) {
-        console.log(`✅ Found ${simpleJobCards.length} elements with job-card-container class`);
-        await clickJobCard(simpleJobCards[0]);
-        return;
-    }
-    
-    // FALLBACK 2: Use our original approach with multiple selectors
-    console.log("⚠️ Job card container not found, trying original selectors");
-    
-    // Continue with your original code for finding left panel/job cards
-    // ... existing code for finding left panel and job cards ...
-    const leftPanelSelectors = [
-      ".scaffold-layout__list",
-      ".jobs-search-results-list",
-      ".jobs-search-two-pane__results"
-    ];
-    
-    let leftPanel = null;
-    for (const selector of leftPanelSelectors) {
-      const element = document.querySelector(selector);
-      if (element) {
-        console.log(`✅ Found job list panel: ${selector}`);
-        leftPanel = element;
-        break;
-      }
-    }
-    
-    if (leftPanel) {
-        // Found a left panel, now look for job cards in it
-        const jobCardSelectors = [
-          ".jobs-search-results__list-item", 
-          ".job-card-container", 
-          ".jobs-search-result-item",
-          "li[data-occludable-job-id]"
-        ];
-        
-        let foundCard = false;
-        
-        // Try each selector individually for better clarity
-        for (const selector of jobCardSelectors) {
-            const cards = leftPanel.querySelectorAll(selector);
-            if (cards.length > 0) {
-                console.log(`✅ Found job card with selector: ${selector}`);
-                await clickJobCard(cards[0]);
-                foundCard = true;
-                break;
-            }
-        }
-        
-        if (!foundCard) {
-            console.log("❌ No job cards found in left panel, starting automation anyway");
-            isRunning = true;
-            updateFabUI();
-            startAutomation();
-        }
     } else {
-        // FALLBACK 3: Last resort - look for job cards anywhere on the page
-        const allJobCardSelectors = [
-            ".jobs-search-results__list-item",
-            ".job-card-container", 
-            ".jobs-search-result-item",
-            ".occludable-update"
-        ];
+        console.log("❌ No job cards with fh-webext-job-display='true' found. Checking for job cards with data-view-name='job card'.");
         
-        let firstJobCard = null;
-        for (const selector of allJobCardSelectors) {
-            const cards = document.querySelectorAll(selector);
-            if (cards.length > 0) {
-                firstJobCard = cards[0];
-                console.log(`✅ Found job card with selector: ${selector}`);
-                break;
-            }
-        }
+        // Find the first job card with the 'data-view-name="job card"' attribute
+        const jobCardsWithViewName = document.querySelectorAll('[data-view-name="job-card"]');
         
-        if (firstJobCard) {
-            await clickJobCard(firstJobCard);
+        if (jobCardsWithViewName.length > 0) {
+            console.log("✅ Found job card with data-view-name='job-card'");
+            const firstCard = jobCardsWithViewName[0];
+            
+            // Highlight it briefly for debugging
+            const originalStyle = firstCard.getAttribute("style") || "";
+            firstCard.setAttribute("style", `${originalStyle}; border: 3px solid red !important; background-color: rgba(255,255,0,0.2) !important;`);
+            
+            await delay(500); // Show highlight briefly
+            firstCard.setAttribute("style", originalStyle);
+            
+            // Click the job card
+            await clickJobCard(firstCard);
+            return;
         } else {
-            console.log("❌ All attempts to find job cards failed. Starting automation anyway");
+            console.log("❌ No job cards with data-view-name='job-card' found. Starting automation anyway.");
+            // Proceed with automation if no job cards are found
             isRunning = true;
             updateFabUI();
             startAutomation();
         }
     }
 }
+
 
 // Keep your existing clickJobCard function
 async function clickJobCard(jobCard) {
@@ -276,7 +229,6 @@ async function clickJobCard(jobCard) {
             try {
                 clickableElements[0].click();
                 clickSucceeded = true;
-                console.log("✅ Successfully clicked element inside job card");
             } catch (err) {
                 console.log("Failed to click element inside job card:", err);
             }
@@ -288,7 +240,6 @@ async function clickJobCard(jobCard) {
             try {
                 jobCard.click();
                 clickSucceeded = true;
-                console.log("✅ Successfully clicked job card directly");
             } catch (err) {
                 console.log("Direct click failed:", err);
             }
@@ -305,19 +256,19 @@ async function clickJobCard(jobCard) {
                 });
                 jobCard.dispatchEvent(clickEvent);
                 clickSucceeded = true;
-                console.log("✅ Successfully dispatched click event");
             } catch (err) {
                 console.log("Event dispatch failed:", err);
             }
         }
         
-        // Wait for job details to fully load
+        // Wait for job details to fully load with a timeout
         console.log("Waiting for job details to load...");
-        await delay(3000);
-        
-        // Check if job details are visible
-        const jobDetails = document.querySelector('.jobs-unified-top-card__content-container, .jobs-details');
+        const jobDetails = await waitForElement('.jobs-unified-top-card__content-container, .jobs-details', 5000);
         console.log(`Job details visible: ${jobDetails ? '✅ Yes' : '❌ No'}`);
+        
+        if (!jobDetails) {
+            throw new Error("Job details did not load in time");
+        }
         
         // Now start automation
         console.log("Starting automation...");
@@ -326,116 +277,12 @@ async function clickJobCard(jobCard) {
         startAutomation();
     } catch (err) {
         console.error("❌ Error in clickJobCard function:", err);
-        // Start automation anyway
-        console.log("Starting automation despite errors...");
-        isRunning = true;
-        updateFabUI();
-        startAutomation();
+        // Retry clicking the job card if it failed
+        console.log("Retrying to click the job card...");
+        await delay(2000);
+        await clickJobCard(jobCard);
     }
 }
-  
-  // Helper function to click on a job card
-  async function clickJobCard(jobCard) {
-    console.log("🖱️ Attempting to click on job card");
-    
-    try {
-      // Scroll to the card first
-      console.log("Scrolling to job card...");
-      jobCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      await delay(1000);
-      
-      // First find all clickable elements inside the job card
-      const clickableElements = jobCard.querySelectorAll('a, button, [role="button"]');
-      console.log(`Found ${clickableElements.length} clickable elements inside the job card`);
-      
-      let clickSucceeded = false;
-      
-      // Try clicking any clickable elements inside first
-      if (clickableElements.length > 0) {
-        console.log("Attempting to click the first clickable element inside job card");
-        try {
-          clickableElements[0].click();
-          clickSucceeded = true;
-          console.log("✅ Successfully clicked element inside job card");
-        } catch (err) {
-          console.log("Failed to click element inside job card:", err);
-        }
-      }
-      
-      // If internal element click didn't work, try direct click on the job card
-      if (!clickSucceeded) {
-        console.log("Attempting direct click on job card");
-        try {
-          jobCard.click();
-          clickSucceeded = true;
-          console.log("✅ Successfully clicked job card directly");
-        } catch (err) {
-          console.log("Direct click failed:", err);
-        }
-      }
-      
-      // If direct click didn't work, try event dispatch
-      if (!clickSucceeded) {
-        console.log("Attempting click via event dispatch");
-        try {
-          const clickEvent = new MouseEvent('click', {
-            view: window,
-            bubbles: true,
-            cancelable: true
-          });
-          jobCard.dispatchEvent(clickEvent);
-          clickSucceeded = true;
-          console.log("✅ Successfully dispatched click event");
-        } catch (err) {
-          console.log("Event dispatch failed:", err);
-        }
-      }
-      
-      // Wait for job details to fully load
-      console.log("Waiting for job details to load...");
-      await delay(3000); // Increased wait time
-      
-      // Check if job details are visible
-      const jobDetails = document.querySelector('.jobs-unified-top-card__content-container, .jobs-details');
-      console.log(`Job details visible: ${jobDetails ? '✅ Yes' : '❌ No'}`);
-      
-      // Now start automation
-      console.log("Starting automation...");
-      isRunning = true;
-      updateFabUI();
-      startAutomation();
-    } catch (err) {
-      console.error("❌ Error in clickJobCard function:", err);
-      // Start automation anyway
-      console.log("Starting automation despite errors...");
-      isRunning = true;
-      updateFabUI();
-      startAutomation();
-    }
-  }
-
-// Update the updateFabUI function as well
-function updateFabUI() {
-    if (!fab) return;
-    
-    if (isRunning) {
-      fab.textContent = "STOP";
-      fab.style.background = "linear-gradient(135deg, #F44336, #B71C1C)";
-      fab.style.boxShadow = 
-        "0 3px 10px rgba(244,67,54,0.3), " +
-        "0 8px 20px rgba(0,0,0,0.15), " +
-        "0 0 0 1px rgba(255,255,255,0.1), " +
-        "inset 0 1px 0 rgba(255,255,255,0.2)";
-    } else {
-      fab.textContent = "Start AI AutoApply";
-      fab.style.background = "linear-gradient(135deg, #1E88E5, #0D47A1)";
-      fab.style.boxShadow = 
-        "0 3px 10px rgba(0,119,181,0.3), " +
-        "0 8px 20px rgba(0,0,0,0.15), " +
-        "0 0 0 1px rgba(255,255,255,0.1), " +
-        "inset 0 1px 0 rgba(255,255,255,0.2)";
-    }
-  }
 
 // Rest of the code remains unchanged
 
@@ -451,8 +298,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else if (message.action === "stop") {
         console.log("⏹️ Stopping LinkedIn automation");
         isRunning = false;
-        // Stop any ongoing processes
-        window.location.reload();
+        stillApplying = false; // Ensure stillApplying is also set to false
+        updateFabUI();
         sendResponse({ status: "Automation stopped" });
     } else if (message.action === "status") {
         // Report current status
@@ -491,7 +338,6 @@ const waitForElement = (selector, timeout = 5000) => {
 // Helper function for delay
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// ...the rest of your code (startAutomation, fillApplicationForm, etc.)...
 
 // Fill application form fields
 async function fillApplicationForm() {
@@ -502,97 +348,104 @@ async function fillApplicationForm() {
     
     if (!modalContainer) {
         console.log("⚠️ No modal container found for form filling");
-        return;
+        return false; // Indicate failure to fill the form
     }
     
-    // Handle text fields - restrict to modal
-    const textInputs = modalContainer.querySelectorAll('input[type="text"]:not([value]), input[type="tel"]:not([value]), input[type="email"]:not([value])');
-    for (const input of textInputs) {
-        input.value = input.type === "tel" ? "9363918085" : "5";
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        await delay(300);
-    }
-    
-    // Handle textareas - restrict to modal
-    const textareas = modalContainer.querySelectorAll('textarea:not([value])');
-    for (const textarea of textareas) {
-        textarea.value = "5";
-        textarea.dispatchEvent(new Event('input', { bubbles: true }));
-        await delay(300);
-    }
-    
-    // Handle dropdowns - restrict to modal
-    const selects = modalContainer.querySelectorAll('select:not([value])');
-    for (const select of selects) {
-        if (select.options.length > 1) {
-            select.value = select.options[1].value;
-            select.dispatchEvent(new Event('change', { bubbles: true }));
+    try {
+        // Handle text fields - restrict to modal
+        const textInputs = modalContainer.querySelectorAll('input[type="text"]:not([value]), input[type="tel"]:not([value]), input[type="email"]:not([value])');
+        for (const input of textInputs) {
+            input.value = input.type === "tel" ? "9363918085" : "5";
+            input.dispatchEvent(new Event('input', { bubbles: true }));
             await delay(300);
         }
-    }
-    
-    // Handle radio buttons - restrict to modal
-// Handle radio buttons - restrict to modal
-const radioGroups = modalContainer.querySelectorAll('fieldset');
-for (const group of radioGroups) {
-    const radios = group.querySelectorAll('input[type="radio"]');
-    if (radios.length > 0 && !Array.from(radios).some(r => r.checked)) {
-        // Get the question text to check for sponsorship
-        const questionText = group.textContent.toLowerCase() || '';
-        const isSponsorship = questionText.includes('sponsor') || 
-                              questionText.includes('sponsorship') || 
-                              questionText.includes('work authorization') ||
-                              questionText.includes('visa');
         
-        if (isSponsorship) {
-            // For sponsorship questions, try to find "No" option
-            console.log("📝 Sponsorship question detected, selecting No");
-            const noOption = Array.from(radios).find(r => 
-                r.value.toLowerCase() === "no" || 
-                r.id.toLowerCase().includes("no")
-            );
-            
-            if (noOption) {
-                noOption.click();
-            } else {
-                // If can't find explicit "No", choose the last option
-                // (often "No" is the second option)
-                radios[radios.length - 1].click();
-            }
-        } else {
-            // For all other questions, try to find "Yes" option
-            console.log("📝 Standard question, selecting Yes");
-            const yesOption = Array.from(radios).find(r => 
-                r.value.toLowerCase() === "yes" || 
-                r.id.toLowerCase().includes("yes")
-            );
-            
-            if (yesOption) {
-                yesOption.click();
-            } else {
-                // If can't find explicit "Yes", choose the first option
-                radios[0].click();
+        // Handle textareas - restrict to modal
+        const textareas = modalContainer.querySelectorAll('textarea:not([value])');
+        for (const textarea of textareas) {
+            textarea.value = "5";
+            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+            await delay(300);
+        }
+        
+        // Handle dropdowns - restrict to modal
+        const selects = modalContainer.querySelectorAll('select:not([value])');
+        for (const select of selects) {
+            if (select.options.length > 1) {
+                select.value = select.options[1].value;
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                await delay(300);
             }
         }
         
-        await delay(300);
+        // Handle radio buttons - restrict to modal
+        const radioGroups = modalContainer.querySelectorAll('fieldset');
+        for (const group of radioGroups) {
+            const radios = group.querySelectorAll('input[type="radio"]');
+            if (radios.length > 0 && !Array.from(radios).some(r => r.checked)) {
+                // Get the question text to check for sponsorship
+                const questionText = group.textContent.toLowerCase() || '';
+                const isSponsorship = questionText.includes('sponsor') || 
+                                      questionText.includes('sponsorship') || 
+                                      questionText.includes('work authorization') ||
+                                      questionText.includes('visa');
+                
+                if (isSponsorship) {
+                    // For sponsorship questions, try to find "No" option
+                    console.log("📝 Sponsorship question detected, selecting No");
+                    const noOption = Array.from(radios).find(r => 
+                        r.value.toLowerCase() === "no" || 
+                        r.id.toLowerCase().includes("no")
+                    );
+                    
+                    if (noOption) {
+                        noOption.click();
+                    } else {
+                        // If can't find explicit "No", choose the last option
+                        // (often "No" is the second option)
+                        radios[radios.length - 1].click();
+                    }
+                } else {
+                    // For all other questions, try to find "Yes" option
+                    console.log("📝 Standard question, selecting Yes");
+                    const yesOption = Array.from(radios).find(r => 
+                        r.value.toLowerCase() === "yes" || 
+                        r.id.toLowerCase().includes("yes")
+                    );
+                    
+                    if (yesOption) {
+                        yesOption.click();
+                    } else {
+                        // If can't find explicit "Yes", choose the first option
+                        radios[0].click();
+                    }
+                }
+                
+                await delay(300);
+            }
+        }
+        
+        // Handle checkboxes - restrict to modal
+        const checkboxes = modalContainer.querySelectorAll('input[type="checkbox"]:not(:checked)');
+        for (const checkbox of checkboxes) {
+            if (checkbox.name !== "jobDetailsEasyApplyTopChoiceCheckbox") {
+                checkbox.click();
+                await delay(300);
+            }
+        }
+        
+        console.log("✅ Form fields filled");
+        return true; // Indicate success
+    } catch (error) {
+        console.error("❌ Error filling application form:", error);
+        return false; // Indicate failure to fill the form
     }
-}
-    
-    // Handle checkboxes - restrict to modal
-    const checkboxes = modalContainer.querySelectorAll('input[type="checkbox"]:not(:checked)');
-    for (const checkbox of checkboxes) {
-        checkbox.click();
-        await delay(300);
-    }
-    
-    console.log("✅ Form fields filled");
 }
 
 async function processApplicationSteps() {
     console.log("⏩ Processing application steps...");
     
-    let stillApplying = true;
+    stillApplying = true;
     let stepCounter = 1;
     let consecutiveEmptySteps = 0;
     const maxSteps = 15; // Increased to handle longer applications
@@ -602,7 +455,7 @@ async function processApplicationSteps() {
             console.log(`Step ${stepCounter}: Looking for action buttons...`);
             
             // Wait for any dialog content to load
-            await delay(1500);
+            await delay(1000);
             
             try {
                 // Check for success message or completion indicators
@@ -638,14 +491,15 @@ async function processApplicationSteps() {
                 
                 // Look for action buttons with valid selectors
                 const submitButton = document.querySelector('button[aria-label="Submit application"], button[data-control-name="submit_application"], button[data-control-name="submit_resume"]');
-                const doneButton = document.querySelector('button.artdeco-button--primary:not([aria-label="Cancel"])');
+                const doneButton = document.querySelector('button[class="artdeco-button artdeco-button--2 artdeco-button--primary ember-view mlA block"]');
                 const reviewButton = document.querySelector('button[aria-label="Review your application"], button[data-control-name="review_application"]');
                 const nextButton = document.querySelector('button[aria-label="Continue to next step"], button[data-control-name="continue_unify"], button.artdeco-button--primary');
+                const cancel = document.querySelector('button[aria-label="Dismiss"]');
+                const discard = document.querySelector('button[data-control-name="discard_application_confirm_btn"]');
                 
                 // Check if this is the first step with a "Review" or similar button
                 const isFirstStep = stepCounter === 1;
                 if (isFirstStep) {
-                    console.log("Available buttons:", document.querySelectorAll('button.artdeco-button'));
                     console.log("⏭️ First step - skipping form fill, looking for Next button");
                     
                     // In first step, prioritize finding any primary button
@@ -665,7 +519,23 @@ async function processApplicationSteps() {
                 }
                 
                 // Fill out the form fields regardless of which button is present
-                await fillApplicationForm();
+                const formFilled = await fillApplicationForm();
+                if (!formFilled) {
+                    console.log("❌ Form filling failed, ending process");
+                    stillApplying = false;
+                    
+                    // Click cancel and discard buttons
+                    if (cancel) {
+                        cancel.click();
+                        await delay(1000);
+                    }
+                    if (discard) {
+                        discard.click();
+                        await delay(1000);
+                    }
+                    
+                    break;
+                }
                 
                 // Now try to find buttons by text content if selectors failed
                 const allButtons = document.querySelectorAll('button');
@@ -822,30 +692,32 @@ async function startAutomation() {
         return;
     }
     console.log("🚀 Starting LinkedIn automation");
-    
+
     try {
         // Click the first unprocessed job card
         const jobCards = document.querySelectorAll(".job-card-container:not([data-processed])");
-        
+
         if (jobCards.length === 0) {
-            console.log("❌ No unprocessed job cards found. Try refreshing the page or searching for more jobs.");
-            return; // Exit to avoid infinite loop with no jobs
+            console.log("❌ No unprocessed job cards found. Moving to next page.");
+            await handlePagination();
+            return;
         }
-        
+
         const job = jobCards[0];
         console.log("🖱️ Clicking job card");
-        
+
         try {
+            // Mark the job card as processed
+            job.setAttribute('data-processed', 'true');
+            
             job.scrollIntoView({ behavior: 'smooth', block: 'center' });
             await delay(1000);
             
-            // Try multiple click approaches
+            // Click the job card
             try {
                 job.click();
             } catch (clickError) {
-                console.log("Direct click failed, trying alternative methods");
-                
-                // Alternative click method
+                console.log("Direct click failed, trying alternative method");
                 const clickEvent = new MouseEvent('click', {
                     view: window,
                     bubbles: true,
@@ -856,140 +728,65 @@ async function startAutomation() {
             
             // Wait for job details to load
             await delay(2000);
+
+            // Look for Easy Apply button
+            const easyApplyButton = document.querySelector('button.jobs-apply-button');
             
-            // Check if this is an external application first
-            const externalApplyIndicators = [
-                // Check for "Apply" button without "Easy"
-                () => {
-                    const applyButtons = document.querySelectorAll('button');
-                    return Array.from(applyButtons).some(btn => {
-                        const text = btn.textContent.trim().toLowerCase();
-                        return text === 'apply' && !text.includes('easy');
-                    });
-                },
-                // Check for text indicating external application
-                () => {
-                    const jobDetails = document.querySelector('.jobs-unified-top-card, .jobs-details');
-                    return jobDetails && jobDetails.textContent.toLowerCase().includes('apply on company website');
-                },
-                // Check for "Apply on company site" button
-                () => {
-                    const buttons = document.querySelectorAll('a, button');
-                    return Array.from(buttons).some(btn => {
-                        const text = btn.textContent.trim().toLowerCase();
-                        return text.includes('apply on company') || text.includes('company site');
-                    });
-                }
-            ];
-            
-            // Check if any external indicators are found
-            let isExternalJob = false;
-            for (const check of externalApplyIndicators) {
-                try {
-                    if (check()) {
-                        isExternalJob = true;
-                        break;
-                    }
-                } catch (e) {
-                    console.log("Error checking external indicator:", e);
-                }
-            }
-            
-            if (isExternalJob) {
-                console.log("🔄 External application detected, skipping this job");
-                job.setAttribute('data-processed', 'true');
-                
-                // Set a short timeout to allow the UI to update before continuing
-                setTimeout(() => {
-                    startAutomation(); // Move to next job immediately
-                }, 1000);
+            if (!easyApplyButton || !easyApplyButton.textContent.toLowerCase().includes('easy apply')) {
+                console.log("❌ No Easy Apply button found or external job, moving to next job");
+                // Recursively call startAutomation to process the next job
+                await startAutomation();
                 return;
             }
+
+            console.log("✅ Found Easy Apply button, clicking...");
+            easyApplyButton.click();
+            await delay(1000);
+
+            // Process the application
+            await processApplicationSteps();
             
-            // More robust Easy Apply button detection with error handling
-            console.log("Looking for Easy Apply button...");
-            let easyApplyBtn = null;
-            
-            // Try different selectors to find the Easy Apply button
-            const easyApplySelectors = [
-                "button.jobs-apply-button",
-                'button[data-control-name="jobdetails_topcard_inapply"]',
-                'button.artdeco-button--primary'
-            ];
-            
-            for (const selector of easyApplySelectors) {
-                try {
-                    const btn = document.querySelector(selector);
-                    if (btn && btn.textContent.toLowerCase().includes("easy apply")) {
-                        easyApplyBtn = btn;
-                        break;
-                    }
-                } catch (e) {
-                    console.log(`Error finding apply button with selector ${selector}:`, e);
-                }
-            }
-            
-            // Last resort - find by text content
-            if (!easyApplyBtn) {
-                try {
-                    const allButtons = document.querySelectorAll('button');
-                    easyApplyBtn = Array.from(allButtons).find(b => 
-                        b.textContent.trim().toLowerCase().includes('easy apply')
-                    );
-                } catch (e) {
-                    console.log("Error finding apply button with text content:", e);
-                }
-            }
-            
-            if (easyApplyBtn) {
-                console.log("🖱️ Found and clicking Easy Apply button");
-                
-                try {
-                    easyApplyBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    await delay(1000);
-                    easyApplyBtn.click();
-                    
-                    // Wait for application modal to appear
-                    await delay(2000);
-                    
-                    // Process immediately - don't check for specific dialog class
-                    console.log("📄 Starting application process...");
-                    await processApplicationSteps();
-                } catch (buttonClickError) {
-                    console.error("❌ Error clicking Easy Apply button:", buttonClickError);
-                }
-            } else {
-                console.log("❌ No Easy Apply button found, marking as processed and moving on");
-                // Log available buttons for debugging
-                try {
-                    const allButtons = document.querySelectorAll('button');
-                    console.log(`Available buttons (${allButtons.length}):`);
-                    Array.from(allButtons).slice(0, 10).forEach((b, i) => {
-                        console.log(`Button ${i}: "${b.textContent.trim()}" class="${b.className}"`);
-                    });
-                } catch (e) {
-                    console.log("Error listing buttons:", e);
-                }
-            }
-            
-            // Mark this job as processed whether we successfully applied or not
-            job.setAttribute('data-processed', 'true');
-            console.log("✅ Job card marked as processed");
-            
+            // Move to next job after processing
+            await startAutomation();
+
         } catch (navigationError) {
-            console.error("❌ Error during job navigation:", navigationError);
-            job.setAttribute('data-processed', 'true'); // Mark as processed even if failed
+            console.error("❌ Error navigating job:", navigationError);
+            // Move to next job even if there's an error
+            await startAutomation();
         }
     } catch (error) {
-        console.error("❌ Error during automation:", error);
+        console.error("❌ Fatal error in automation:", error);
+        isRunning = false;
+    }
+}
+
+// Helper function to handle pagination
+async function handlePagination() {
+    const paginationItems = document.querySelectorAll('.artdeco-pagination__pages .artdeco-pagination__indicator');
+    const activePage = Array.from(paginationItems).find(item => item.classList.contains('active'));
+    
+    if (activePage) {
+        const nextPage = activePage.nextElementSibling;
+        if (nextPage && nextPage.tagName === 'LI') {
+            const nextButton = nextPage.querySelector('button');
+            if (nextButton) {
+                const priorUrl = window.location.href;
+                console.log("✅ Found the next page button, clicking...");
+                nextButton.click();
+                await delay(5000);
+
+                if (priorUrl === window.location.href) {
+                    console.log("❌ Page navigation failed");
+                    isRunning = false;
+                } else {
+                    console.log("✅ Successfully navigated to next page");
+                    await startAutomation();
+                }
+                return;
+            }
+        }
     }
     
-    // Schedule the next job after a delay, but only if running
-    if (isRunning) {
-        setTimeout(() => {
-            startAutomation();
-        }, 3000); // Reduced delay to make the process faster
-    } else {
-        console.log("⏹️ Automation stopped, not scheduling next job");
-    }
+    console.log("❌ No more pages to process");
+    isRunning = false;
 }
