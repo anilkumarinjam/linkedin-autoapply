@@ -4,6 +4,13 @@ let isRunning = false;
 let stillApplying = false;
 let fab = null; // Declare fab globally so it can be accessed from anywhere
 
+function checkIfShouldStop() {
+    if (!isRunning) {
+        console.log("⏹️ Stop signal received, interrupting automation");
+        throw new Error("AUTOMATION_STOPPED");
+    }
+}
+
 async function getUserSettings() {
     return new Promise((resolve) => {
         chrome.storage.sync.get(['userSettings'], (result) => {
@@ -113,10 +120,17 @@ window.addEventListener("load", () => {
     isDragging = false;
   });
 
-  fab.addEventListener("click", (e) => {
+fab.addEventListener("click", async (e) => {
     // Only handle click if we weren't dragging
     if (isDragging) return;
-    
+    // First check if user is authenticated
+    const isAuthenticated = await getUserSettings()==null?false:true;
+    if (!isAuthenticated) {
+        console.log("🔒 User not authenticated, opening extension popup");
+        // Send message to open extension popup
+        chrome.runtime.sendMessage({ action: "openPopup" });
+        return;
+    }
     const currentUrl = window.location.href;
     if (!currentUrl.includes("/jobs")) {
         localStorage.setItem("shouldStartAfterRedirect", "true");
@@ -135,6 +149,13 @@ window.addEventListener("load", () => {
             isRunning = false;
             stillApplying = false;
             updateFabUI();
+            // Add immediate cleanup
+            try {
+                const closeButtons = document.querySelectorAll('button[aria-label="Dismiss"], button.artdeco-modal__dismiss');
+                if (closeButtons.length > 0) {
+                    closeButtons[0].click();
+                }
+            } catch (e) { /* ignore */ }
             // Notify the extension popup about the state change
             chrome.runtime.sendMessage({ action: "updateState", isRunning: false });
         }
@@ -189,15 +210,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 // Fix for startAutomation to properly handle external jobs and move to the next job
 async function startAutomation() {
-    if (!isRunning) {
-        console.log("⏹️ Automation is stopped, exiting...");
-        return;
-    }
-    console.log("🚀 Starting LinkedIn automation");
-
     try {
+        checkIfShouldStop(); // Check if automation should stop at the beginning
+        
         // Look for job cards with fh-webext-job-display attribute
         const jobCards = document.querySelectorAll('li[fh-webext-job-display]');
+        checkIfShouldStop(); // Check if automation should stop after job cards are found
+        
         console.log(`📝 Found ${jobCards.length} job cards on this page`);
         
         if (jobCards.length === 0) {
@@ -208,12 +227,13 @@ async function startAutomation() {
 
         // Get the first job card
         const job = jobCards[0];
-        console.log("🖱️ Clicking job card");
-
+        checkIfShouldStop(); // Check if automation should stop before interacting with the job card
+        
         try {
             // First scroll the job list to ensure the card is in view
             job.scrollIntoView({ behavior: 'smooth', block: 'center' });
             await delay(1000);
+            checkIfShouldStop(); // Check if automation should stop after scrolling
 
             // Find and click the job title link within the card
             const jobLink = job.querySelector('a[data-control-name="job_card_title"]') || 
@@ -254,15 +274,23 @@ async function startAutomation() {
             await startAutomation();
 
         } catch (navigationError) {
+            if (navigationError.message === "AUTOMATION_STOPPED") {
+                return;
+            }
             console.error("❌ Error navigating job:", navigationError);
             job.remove();
             await startAutomation();
         }
     } catch (error) {
+        if (error.message === "AUTOMATION_STOPPED") {
+            console.log("🛑 Automation stopped successfully");
+            return;
+        }
         console.error("❌ Fatal error in automation:", error);
         isRunning = false;
     }
 }
+
 // Helper function to handle pagination
 async function handlePagination() {
     const paginationItems = document.querySelectorAll('.artdeco-pagination__pages .artdeco-pagination__indicator');
@@ -436,19 +464,18 @@ async function fillApplicationForm() {
 async function processApplicationSteps() {
     console.log("⏩ Processing application steps...");
     
-    stillApplying = true;
-    let stepCounter = 1;
-    let consecutiveEmptySteps = 0;
-    const maxSteps = 15; // Increased to handle longer applications
-    
     try {
         while (stillApplying && stepCounter <= maxSteps) {
+            checkIfShouldStop(); // Check if automation should stop before each step
+            
             console.log(`Step ${stepCounter}: Looking for action buttons...`);
             
             // Wait for any dialog content to load
             await delay(1000);
             
             try {
+                checkIfShouldStop(); // Check if automation should stop inside try block
+                
                 // Check for success message or completion indicators
                 const successIndicators = [
                     "application submitted",
@@ -509,74 +536,54 @@ async function processApplicationSteps() {
                     }
                 }
                 
-                // Fill out the form fields regardless of which button is present
-                const formFilled = await fillApplicationForm();
-                if (!formFilled) {
-                    console.log("❌ Form filling failed, ending process");
-                    stillApplying = false;
+                // Check if form filling is needed
+                const needsFormFilling = true; // Placeholder, replace with actual logic
+                if (needsFormFilling) {
+                    const formFilled = await fillApplicationForm();
+                    checkIfShouldStop(); // Check if automation should stop after form filling
                     
-                    // Click cancel and discard buttons
-                    if (cancel) {
-                        cancel.click();
-                        await delay(1000);
-                    }
-                    if (discard) {
-                        discard.click();
-                        await delay(1000);
-                    }
-                    
-                    break;
-                }
-                
-                // Now try to find buttons by text content if selectors failed
-                const allButtons = document.querySelectorAll('button');
-                let buttonFound = false;
-                
-                // Check for submit button by text
-                if (!submitButton) {
-                    const submitByText = Array.from(allButtons).find(btn => {
-                        const text = btn.textContent.trim().toLowerCase();
-                        return text === 'submit' || text === 'submit application' || text.includes('submit application');
-                    });
-                    
-                    if (submitByText) {
-                        console.log("🎉 Found Submit button by text, clicking...");
-                        submitByText.click();
+                    if (!formFilled) {
+                        console.log("❌ Form filling failed, ending process");
                         stillApplying = false;
-                        await delay(2000);
                         
-                        // Close any success dialogs
-                        try {
-                            const closeButtons = document.querySelectorAll('button[aria-label="Dismiss"], button.artdeco-modal__dismiss');
-                            if (closeButtons.length > 0) {
-                                closeButtons[0].click();
-                            }
-                        } catch (e) {
-                            console.log("Error closing dialog:", e);
+                        // Click cancel and discard buttons
+                        if (cancel) {
+                            cancel.click();
+                            await delay(1000);
+                        }
+                        if (discard) {
+                            discard.click();
+                            await delay(1000);
                         }
                         
-                        console.log("✅ Application process completed");
                         break;
                     }
                 }
                 
-                // Check for the most common button patterns
+                // Add checks before button clicks
                 if (submitButton) {
+                    checkIfShouldStop(); // Check if automation should stop before clicking the submit button
                     console.log("✅ Found Submit button, clicking...");
                     submitButton.click();
                     stillApplying = false;
                     await delay(2000);
                     
-                    // Try to close any remaining dialogs
-                    const closeButtons = document.querySelectorAll('button[aria-label="Dismiss"], button.artdeco-modal__dismiss');
-                    if (closeButtons.length > 0) {
-                        closeButtons[0].click();
+                    // Close any success dialogs
+                    try {
+                        const closeButtons = document.querySelectorAll('button[aria-label="Dismiss"], button.artdeco-modal__dismiss');
+                        if (closeButtons.length > 0) {
+                            closeButtons[0].click();
+                        }
+                    } catch (e) {
+                        console.log("Error closing dialog:", e);
                     }
                     
                     console.log("✅ Application process completed");
                     break;
                 }
-                else if (doneButton) {
+                
+                // Handle other buttons
+                if (doneButton) {
                     console.log("✅ Found Done button, clicking...");
                     doneButton.click();
                     stillApplying = false;
@@ -587,20 +594,20 @@ async function processApplicationSteps() {
                 else if (reviewButton) {
                     console.log("✅ Found Review button, clicking...");
                     reviewButton.click();
-                    buttonFound = true;
+                    await delay(1500); // Wait for the review page to load
                 }
                 else if (nextButton) {
                     console.log("✅ Found Next button, clicking...");
                     nextButton.click();
-                    buttonFound = true;
+                    await delay(1500);
                 }
                 
-                if (!buttonFound) {
-                    // Last resort: look for any button with next/continue/submit in the text
+                // Last resort: look for any button with next/continue/submit in the text
+                if (!submitButton && !doneButton && !reviewButton && !nextButton) {
                     console.log("⚠️ No standard buttons found, looking for buttons by text content");
                     
                     const actionButtonTexts = ["next", "continue", "review", "submit"];
-                    const actionButton = Array.from(allButtons).find(btn => {
+                    const actionButton = Array.from(document.querySelectorAll('button')).find(btn => {
                         const text = btn.textContent.trim().toLowerCase();
                         return actionButtonTexts.some(actionText => text.includes(actionText));
                     });
@@ -608,7 +615,6 @@ async function processApplicationSteps() {
                     if (actionButton) {
                         console.log(`✅ Found button with action text: "${actionButton.textContent.trim()}", clicking...`);
                         actionButton.click();
-                        buttonFound = true;
                     } else {
                         console.log("⚠️ No action buttons found by text in this step");
                         consecutiveEmptySteps++;
@@ -632,6 +638,16 @@ async function processApplicationSteps() {
                 await delay(1500);
                 
             } catch (stepError) {
+                if (stepError.message === "AUTOMATION_STOPPED") {
+                    // Clean up any open dialogs
+                    try {
+                        const closeButtons = document.querySelectorAll('button[aria-label="Dismiss"], button.artdeco-modal__dismiss');
+                        if (closeButtons.length > 0) {
+                            closeButtons[0].click();
+                        }
+                    } catch (e) { /* ignore */ }
+                    return;
+                }
                 console.log(`❌ Error in application step ${stepCounter}:`, stepError);
                 stepCounter++;
                 
@@ -664,6 +680,9 @@ async function processApplicationSteps() {
         console.log("✅ Application process completed");
         
     } catch (processError) {
+        if (processError.message === "AUTOMATION_STOPPED") {
+            return;
+        }
         console.error("❌ Fatal error in application process:", processError);
         
         // Try to close any open dialogs on error
@@ -675,4 +694,5 @@ async function processApplicationSteps() {
         } catch (e) { /* ignore */ }
     }
 }
+
 

@@ -36,4 +36,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ status: "Navigation initiated" });
         return true;
     }
+    if (message.action === "openPopup") {
+        // Open the extension popup
+        chrome.action.openPopup();
+    }
 });
