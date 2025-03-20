@@ -17,7 +17,7 @@
     },
     "web_accessible_resources": [
         {
-            "resources": ["supabase.js", "config.js", "popup.js","icons/ai_auto.png"],
+            "resources": ["supabase.js", "config.js", "popup.js","icons/ai_auto.png","icons/running.gif"],
             "matches": ["<all_urls>"]
         }
     ],

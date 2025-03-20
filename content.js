@@ -1,8 +1,18 @@
 console.log("✅ LinkedIn Auto Apply content script loaded");
+
 let extensionIconClicked = false;
 let isRunning = false;
 let stillApplying = false;
 let fab = null; // Declare fab globally so it can be accessed from anywhere
+let stepCounter = 0;
+let maxSteps = 10;
+let consecutiveEmptySteps = 0;
+
+// First, create a reference to both images at the top of your file
+const FAB_IMAGES = {
+    default: chrome.runtime.getURL("icons/ai_auto.png"),
+    running: chrome.runtime.getURL("icons/running.gif")
+};
 
 function checkIfShouldStop() {
     if (!isRunning) {
@@ -77,7 +87,7 @@ window.addEventListener("load", () => {
   
   // Add the image to the FAB
   const fabImage = document.createElement("img");
-  fabImage.src = chrome.runtime.getURL("icons/ai_auto.png");
+  fabImage.src = FAB_IMAGES.default; // Set default image
   fabImage.style.width = "180%";
   fabImage.style.height = "160%";
   fabImage.style.objectFit = "contain";
@@ -124,7 +134,7 @@ fab.addEventListener("click", async (e) => {
     // Only handle click if we weren't dragging
     if (isDragging) return;
     // First check if user is authenticated
-    const isAuthenticated = await getUserSettings()==null?false:true;
+    const isAuthenticated = await getUserSettings() == null ? false : true;
     if (!isAuthenticated) {
         console.log("🔒 User not authenticated, opening extension popup");
         // Send message to open extension popup
@@ -167,22 +177,35 @@ fab.addEventListener("click", async (e) => {
 function updateFabUI() {
     if (!fab) return;
     
+    const fabImage = fab.querySelector('img');
+    
     if (isRunning) {
-      fab.style.background = "linear-gradient(135deg, #F44336, #B71C1C)";
-      fab.style.boxShadow = 
-        "0 3px 10px rgba(244,67,54,0.3), " +
-        "0 8px 20px rgba(0,0,0,0.15), " +
-        "0 0 0 1px rgba(255,255,255,0.1), " +
-        "inset 0 1px 0 rgba(255,255,255,0.2)";
+        fab.style.background = "linear-gradient(135deg, #F44336, #B71C1C)";
+        fab.style.boxShadow = 
+            "0 3px 10px rgba(244,67,54,0.3), " +
+            "0 8px 20px rgba(0,0,0,0.15), " +
+            "0 0 0 1px rgba(255,255,255,0.1), " +
+            "inset 0 1px 0 rgba(255,255,255,0.2)";
+        // Change the image
+        if (fabImage) {
+            fabImage.src = FAB_IMAGES.running;
+            fabImage.style.paddingRight = "12px";
+            fabImage.style.transform = "translateX(-4px) scale(1.4)";
+        }
     } else {
-      fab.style.background = "linear-gradient(135deg, #1E88E5, #0D47A1)";
-      fab.style.boxShadow = 
-        "0 3px 10px rgba(0,119,181,0.3), " +
-        "0 8px 20px rgba(0,0,0,0.15), " +
-        "0 0 0 1px rgba(255,255,255,0.1), " +
-        "inset 0 1px 0 rgba(255,255,255,0.2)";
+        fab.style.background = "linear-gradient(135deg,rgb(128, 54, 231), #0D47A1)";
+        fab.style.boxShadow = 
+            "0 3px 10px rgba(0,119,181,0.3), " +
+            "0 8px 20px rgba(0,0,0,0.15), " +
+            "0 0 0 1px rgba(255,255,255,0.1), " +
+            "inset 0 1px 0 rgba(255,255,255,0.2)";
+        // Change back to default image
+        if (fabImage) {
+            fabImage.src = FAB_IMAGES.default;
+        }
     }
 }
+
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log("Message received:", message);
@@ -208,8 +231,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     return true;
 });
-// Fix for startAutomation to properly handle external jobs and move to the next job
+// Add reset function for application process
+function resetApplicationState() {
+    stepCounter = 0;
+    consecutiveEmptySteps = 0;
+    stillApplying = true;
+}
+
+// Update startAutomation to reset state before processing
 async function startAutomation() {
+    resetApplicationState();
     try {
         checkIfShouldStop(); // Check if automation should stop at the beginning
         
@@ -374,7 +405,14 @@ async function fillApplicationForm() {
         // Handle text fields - restrict to modal
         const textInputs = modalContainer.querySelectorAll('input[type="text"]:not([value]), input[type="tel"]:not([value]), input[type="email"]:not([value])');
         for (const input of textInputs) {
-            input.value = input.type === "tel" ? userSettings.phone_number : userSettings.default_answer;;
+            // Check for phone number fields using multiple identifiers
+            const isPhoneField = 
+                input.id?.toLowerCase().includes('phone') || 
+                input.name?.toLowerCase().includes('phone') ||
+                input.getAttribute('aria-describedby')?.toLowerCase().includes('phone') ||
+                input.placeholder?.toLowerCase().includes('phone');
+            
+            input.value = isPhoneField ? userSettings.phone_number : userSettings.default_answer;
             input.dispatchEvent(new Event('input', { bubbles: true }));
             await delay(300);
         }
