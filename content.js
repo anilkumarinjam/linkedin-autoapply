@@ -4,6 +4,14 @@ let isRunning = false;
 let stillApplying = false;
 let fab = null; // Declare fab globally so it can be accessed from anywhere
 
+async function getUserSettings() {
+    return new Promise((resolve) => {
+        chrome.storage.sync.get(['userSettings'], (result) => {
+            resolve(result.userSettings || null);
+        });
+    });
+}
+
 window.addEventListener("load", () => {
   if (!window.location.hostname.includes("linkedin.com")) return;
   if (document.getElementById("autoApplyFab")) return;
@@ -67,9 +75,9 @@ window.addEventListener("load", () => {
   fabImage.style.height = "160%";
   fabImage.style.objectFit = "contain";
   fabImage.style.pointerEvents = "none"; // Ensure the image doesn't interfere with button clicks
-  fabImage.style.paddingRight = "10px"; // Add padding to the right
+  fabImage.style.paddingRight = "7px"; // Add padding to the right
   fabImage.style.paddingBottom="10px";
-  fabImage.style.transform = "translateX(-8px) scale(1.2)";
+  fabImage.style.transform = "translateX(-4px) scale(1.4)";
   fab.appendChild(fabImage);
   
   document.body.appendChild(fab);
@@ -320,6 +328,11 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // Fill application form fields
 async function fillApplicationForm() {
     console.log("📝 Filling application form...");
+    const userSettings = await getUserSettings();
+    if (!userSettings) {
+        console.log("⚠️ No user settings found");
+        return false;
+    }
     
     // Get the active modal container to restrict our scope
     const modalContainer = document.querySelector('.jobs-easy-apply-content, .artdeco-modal__content, .ember-view');
@@ -333,7 +346,7 @@ async function fillApplicationForm() {
         // Handle text fields - restrict to modal
         const textInputs = modalContainer.querySelectorAll('input[type="text"]:not([value]), input[type="tel"]:not([value]), input[type="email"]:not([value])');
         for (const input of textInputs) {
-            input.value = input.type === "tel" ? "9363918085" : "5";
+            input.value = input.type === "tel" ? userSettings.phone_number : userSettings.default_answer;;
             input.dispatchEvent(new Event('input', { bubbles: true }));
             await delay(300);
         }
@@ -341,7 +354,7 @@ async function fillApplicationForm() {
         // Handle textareas - restrict to modal
         const textareas = modalContainer.querySelectorAll('textarea:not([value])');
         for (const textarea of textareas) {
-            textarea.value = "5";
+            textarea.value = userSettings.default_answer;
             textarea.dispatchEvent(new Event('input', { bubbles: true }));
             await delay(300);
         }
