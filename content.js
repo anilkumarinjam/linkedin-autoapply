@@ -1,5 +1,5 @@
 console.log("✅ LinkedIn Auto Apply content script loaded");
-
+let extensionIconClicked = false;
 let isRunning = false;
 let stillApplying = false;
 let fab = null; // Declare fab globally so it can be accessed from anywhere
@@ -84,7 +84,7 @@ window.addEventListener("load", () => {
       localStorage.removeItem("shouldStartAfterRedirect");
     
       // Delay starting automation to ensure the page is fully loaded
-      setTimeout(() => clickJobCardWithViewName(), 2000);
+      setTimeout(() => startAutomation(), 2000);
     }
   }
 
@@ -111,25 +111,27 @@ window.addEventListener("load", () => {
     
     const currentUrl = window.location.href;
     if (!currentUrl.includes("/jobs")) {
-        // If not on jobs page, set flag and redirect
         localStorage.setItem("shouldStartAfterRedirect", "true");
         console.log("📍 Not on jobs page, redirecting to job search URL");
         window.location.href = linkedInJobsUrl;
-    }  else {
-        // Already on jobs page or subpage
+    } else {
         if (!isRunning) {
-            console.log("🚀 Starting automation on jobs page");
+            console.log("🚀 Starting automation from FAB");
             isRunning = true;
             updateFabUI();
-            clickJobCardWithViewName();
+            // Notify the extension popup about the state change
+            chrome.runtime.sendMessage({ action: "updateState", isRunning: true });
+            startAutomation();
         } else {
-            console.log("⏹️ Stopping automation");
+            console.log("⏹️ Stopping automation from FAB");
             isRunning = false;
-            stillApplying = false; // Ensure stillApplying is also set to false
+            stillApplying = false;
             updateFabUI();
+            // Notify the extension popup about the state change
+            chrome.runtime.sendMessage({ action: "updateState", isRunning: false });
         }
     }
- });
+});
 });
 
 // Update the updateFabUI function as well
@@ -152,140 +154,6 @@ function updateFabUI() {
         "inset 0 1px 0 rgba(255,255,255,0.2)";
     }
 }
-
-async function clickJobCardWithViewName() {
-    console.log("🎯 Attempting to find and click the first job card with fh-webext-job-display='true'");
-    
-    // Wait for the page to fully load and stabilize
-    await delay(3000);
-    
-    // Find the first job card with the 'fh-webext-job-display="true"' attribute
-    const jobCards = document.querySelectorAll('li[fh-webext-job-display="true"]');
-    
-    if (jobCards.length > 0) {
-        console.log("✅ Found job card with fh-webext-job-display='true'");
-        const firstCard = jobCards[0];
-        
-        // Highlight it briefly for debugging
-        const originalStyle = firstCard.getAttribute("style") || "";
-        firstCard.setAttribute("style", `${originalStyle}; border: 3px solid red !important; background-color: rgba(255,255,0,0.2) !important;`);
-        
-        await delay(500); // Show highlight briefly
-        firstCard.setAttribute("style", originalStyle);
-        
-        // Click the job card
-        await clickJobCard(firstCard);
-        return;
-    } else {
-        console.log("❌ No job cards with fh-webext-job-display='true' found. Checking for job cards with data-view-name='job card'.");
-        
-        // Find the first job card with the 'data-view-name="job card"' attribute
-        const jobCardsWithViewName = document.querySelectorAll('[data-view-name="job-card"]');
-        
-        if (jobCardsWithViewName.length > 0) {
-            console.log("✅ Found job card with data-view-name='job-card'");
-            const firstCard = jobCardsWithViewName[0];
-            
-            // Highlight it briefly for debugging
-            const originalStyle = firstCard.getAttribute("style") || "";
-            firstCard.setAttribute("style", `${originalStyle}; border: 3px solid red !important; background-color: rgba(255,255,0,0.2) !important;`);
-            
-            await delay(500); // Show highlight briefly
-            firstCard.setAttribute("style", originalStyle);
-            
-            // Click the job card
-            await clickJobCard(firstCard);
-            return;
-        } else {
-            console.log("❌ No job cards with data-view-name='job-card' found. Starting automation anyway.");
-            // Proceed with automation if no job cards are found
-            isRunning = true;
-            updateFabUI();
-            startAutomation();
-        }
-    }
-}
-
-
-// Keep your existing clickJobCard function
-async function clickJobCard(jobCard) {
-    console.log("🖱️ Attempting to click on job card");
-    
-    try {
-        // Scroll to the card first
-        console.log("Scrolling to job card...");
-        jobCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        await delay(1000);
-        
-        // First find all clickable elements inside the job card
-        const clickableElements = jobCard.querySelectorAll('a, button, [role="button"]');
-        console.log(`Found ${clickableElements.length} clickable elements inside the job card`);
-        
-        let clickSucceeded = false;
-        
-        // Try clicking any clickable elements inside first
-        if (clickableElements.length > 0) {
-            console.log("Attempting to click the first clickable element inside job card");
-            try {
-                clickableElements[0].click();
-                clickSucceeded = true;
-            } catch (err) {
-                console.log("Failed to click element inside job card:", err);
-            }
-        }
-        
-        // If internal element click didn't work, try direct click on the job card
-        if (!clickSucceeded) {
-            console.log("Attempting direct click on job card");
-            try {
-                jobCard.click();
-                clickSucceeded = true;
-            } catch (err) {
-                console.log("Direct click failed:", err);
-            }
-        }
-        
-        // If direct click didn't work, try event dispatch
-        if (!clickSucceeded) {
-            console.log("Attempting click via event dispatch");
-            try {
-                const clickEvent = new MouseEvent('click', {
-                    view: window,
-                    bubbles: true,
-                    cancelable: true
-                });
-                jobCard.dispatchEvent(clickEvent);
-                clickSucceeded = true;
-            } catch (err) {
-                console.log("Event dispatch failed:", err);
-            }
-        }
-        
-        // Wait for job details to fully load with a timeout
-        console.log("Waiting for job details to load...");
-        const jobDetails = await waitForElement('.jobs-unified-top-card__content-container, .jobs-details', 5000);
-        console.log(`Job details visible: ${jobDetails ? '✅ Yes' : '❌ No'}`);
-        
-        if (!jobDetails) {
-            throw new Error("Job details did not load in time");
-        }
-        
-        // Now start automation
-        console.log("Starting automation...");
-        isRunning = true;
-        updateFabUI();
-        startAutomation();
-    } catch (err) {
-        console.error("❌ Error in clickJobCard function:", err);
-        // Retry clicking the job card if it failed
-        console.log("Retrying to click the job card...");
-        await delay(2000);
-        await clickJobCard(jobCard);
-    }
-}
-
-// Rest of the code remains unchanged
-
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log("Message received:", message);
@@ -293,12 +161,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "start") {
         console.log("🚀 Starting LinkedIn automation");
         isRunning = true;
+        extensionIconClicked = true;
+        updateFabUI(); // Update FAB UI when started from extension
         startAutomation();
         sendResponse({ status: "Automation started" });
     } else if (message.action === "stop") {
         console.log("⏹️ Stopping LinkedIn automation");
         isRunning = false;
-        stillApplying = false; // Ensure stillApplying is also set to false
+        extensionIconClicked = false;
+        stillApplying = false;
         updateFabUI();
         sendResponse({ status: "Automation stopped" });
     } else if (message.action === "status") {
@@ -306,8 +177,115 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ isRunning });
     }
     
-    return true; // Indicates async response
+    return true;
 });
+// Fix for startAutomation to properly handle external jobs and move to the next job
+async function startAutomation() {
+    if (!isRunning) {
+        console.log("⏹️ Automation is stopped, exiting...");
+        return;
+    }
+    console.log("🚀 Starting LinkedIn automation");
+
+    try {
+        // Look for job cards with fh-webext-job-display attribute
+        const jobCards = document.querySelectorAll('li[fh-webext-job-display]');
+        console.log(`📝 Found ${jobCards.length} job cards on this page`);
+        
+        if (jobCards.length === 0) {
+            console.log("❌ No job cards found. Moving to next page.");
+            await handlePagination();
+            return;
+        }
+
+        // Get the first job card
+        const job = jobCards[0];
+        console.log("🖱️ Clicking job card");
+
+        try {
+            // First scroll the job list to ensure the card is in view
+            job.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            await delay(1000);
+
+            // Find and click the job title link within the card
+            const jobLink = job.querySelector('a[data-control-name="job_card_title"]') || 
+                           job.querySelector('.job-card-list__title') ||
+                           job.querySelector('a[href*="/jobs/view/"]');
+
+            if (!jobLink) {
+                console.log("❌ Could not find job link in card, removing and moving to next");
+                job.remove();
+                await startAutomation();
+                return;
+            }
+
+            // Click the job link
+            console.log("🔍 Found job link, clicking...");
+            jobLink.click();
+            await delay(2000); // Wait for job details to load
+
+            // Look for Easy Apply button
+            const easyApplyButton = document.querySelector('button.jobs-apply-button');
+            
+            if (!easyApplyButton || !easyApplyButton.textContent.toLowerCase().includes('easy apply')) {
+                console.log("❌ No Easy Apply button found or external job, moving to next job");
+                job.remove();
+                await startAutomation();
+                return;
+            }
+
+            console.log("✅ Found Easy Apply button, clicking...");
+            easyApplyButton.click();
+            await delay(1000);
+
+            // Process the application
+            await processApplicationSteps();
+            
+            // Remove this job card and move to next job
+            job.remove();
+            await startAutomation();
+
+        } catch (navigationError) {
+            console.error("❌ Error navigating job:", navigationError);
+            job.remove();
+            await startAutomation();
+        }
+    } catch (error) {
+        console.error("❌ Fatal error in automation:", error);
+        isRunning = false;
+    }
+}
+// Helper function to handle pagination
+async function handlePagination() {
+    const paginationItems = document.querySelectorAll('.artdeco-pagination__pages .artdeco-pagination__indicator');
+    const activePage = Array.from(paginationItems).find(item => item.classList.contains('active'));
+    
+    if (activePage) {
+        const nextPage = activePage.nextElementSibling;
+        if (nextPage && nextPage.tagName === 'LI') {
+            const nextButton = nextPage.querySelector('button');
+            if (nextButton) {
+                const priorUrl = window.location.href;
+                console.log("✅ Found the next page button, clicking...");
+                nextButton.click();
+                await delay(5000);
+
+                if (priorUrl === window.location.href) {
+                    console.log("❌ Page navigation failed");
+                    isRunning = false;
+                } else {
+                    console.log("✅ Successfully navigated to next page");
+                    await startAutomation();
+                }
+                return;
+            }
+        }
+    }
+    
+    console.log("❌ No more pages to process");
+    isRunning = false;
+}
+
 
 // Helper function to wait for an element to appear
 const waitForElement = (selector, timeout = 5000) => {
@@ -685,108 +663,3 @@ async function processApplicationSteps() {
     }
 }
 
-// Fix for startAutomation to properly handle external jobs and move to the next job
-async function startAutomation() {
-    if (!isRunning) {
-        console.log("⏹️ Automation is stopped, exiting...");
-        return;
-    }
-    console.log("🚀 Starting LinkedIn automation");
-
-    try {
-        // Click the first unprocessed job card
-        const jobCards = document.querySelectorAll(".job-card-container:not([data-processed])");
-
-        if (jobCards.length === 0) {
-            console.log("❌ No unprocessed job cards found. Moving to next page.");
-            await handlePagination();
-            return;
-        }
-
-        const job = jobCards[0];
-        console.log("🖱️ Clicking job card");
-
-        try {
-            // Mark the job card as processed
-            job.setAttribute('data-processed', 'true');
-            
-            job.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            await delay(1000);
-            
-            // Click the job card
-            try {
-                job.click();
-            } catch (clickError) {
-                console.log("Direct click failed, trying alternative method");
-                const clickEvent = new MouseEvent('click', {
-                    view: window,
-                    bubbles: true,
-                    cancelable: true
-                });
-                job.dispatchEvent(clickEvent);
-            }
-            
-            // Wait for job details to load
-            await delay(2000);
-
-            // Look for Easy Apply button
-            const easyApplyButton = document.querySelector('button.jobs-apply-button');
-            
-            if (!easyApplyButton || !easyApplyButton.textContent.toLowerCase().includes('easy apply')) {
-                console.log("❌ No Easy Apply button found or external job, moving to next job");
-                // Recursively call startAutomation to process the next job
-                await startAutomation();
-                return;
-            }
-
-            console.log("✅ Found Easy Apply button, clicking...");
-            easyApplyButton.click();
-            await delay(1000);
-
-            // Process the application
-            await processApplicationSteps();
-            
-            // Move to next job after processing
-            await startAutomation();
-
-        } catch (navigationError) {
-            console.error("❌ Error navigating job:", navigationError);
-            // Move to next job even if there's an error
-            await startAutomation();
-        }
-    } catch (error) {
-        console.error("❌ Fatal error in automation:", error);
-        isRunning = false;
-    }
-}
-
-// Helper function to handle pagination
-async function handlePagination() {
-    const paginationItems = document.querySelectorAll('.artdeco-pagination__pages .artdeco-pagination__indicator');
-    const activePage = Array.from(paginationItems).find(item => item.classList.contains('active'));
-    
-    if (activePage) {
-        const nextPage = activePage.nextElementSibling;
-        if (nextPage && nextPage.tagName === 'LI') {
-            const nextButton = nextPage.querySelector('button');
-            if (nextButton) {
-                const priorUrl = window.location.href;
-                console.log("✅ Found the next page button, clicking...");
-                nextButton.click();
-                await delay(5000);
-
-                if (priorUrl === window.location.href) {
-                    console.log("❌ Page navigation failed");
-                    isRunning = false;
-                } else {
-                    console.log("✅ Successfully navigated to next page");
-                    await startAutomation();
-                }
-                return;
-            }
-        }
-    }
-    
-    console.log("❌ No more pages to process");
-    isRunning = false;
-}
