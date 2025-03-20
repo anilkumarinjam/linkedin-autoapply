@@ -117,7 +117,7 @@ function setupFormListeners() {
         const startBtn = document.getElementById("start");
         const statusEl = document.getElementById("status");
         
-        if (!currentUrl.includes("/jobs")) {
+        if (!currentUrl.includes("/jobs/search")) {
             statusEl.innerText = "Navigate to Jobs";
             statusEl.style.color = "#e53935";
             startBtn.addEventListener("click", () => {
@@ -129,6 +129,7 @@ function setupFormListeners() {
         }
     });
 }
+
 async function getUserSettings() {
     return new Promise((resolve) => {
         chrome.storage.sync.get(['userSettings'], (result) => {
@@ -136,6 +137,7 @@ async function getUserSettings() {
         });
     });
 }
+
 async function loadUserSettings() {
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (!session) return;
@@ -164,13 +166,25 @@ function showControls() {
 function startAutomation() {
     chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
         const currentUrl = tabs[0].url;
+        const linkedInJobsUrl = "https://www.linkedin.com/jobs/search/?f_AL=true&f_E=2%2C3%2C4&f_TPR=r86400&geoId=103644278&keywords=java%20full%20stack%20developer&origin=JOB_SEARCH_PAGE_JOB_FILTER&refresh=true";
         
-        if (!currentUrl.includes("/jobs")) {
-            console.log("Not on jobs page, redirecting...");
+        // Check if we're on the correct jobs search page
+        if (!currentUrl.includes("/jobs/search/")) {
+            console.log("📍 Not on desired jobs page, setting redirect flag and navigating...");
+            
+            // Update UI to show redirecting status
+            const statusEl = document.getElementById("status");
+            statusEl.innerText = "Redirecting...";
+            statusEl.style.color = "#FFA500";
+            
+            // Set redirect flag using localStorage instead of chrome.storage.local
+            localStorage.setItem("shouldStartAfterRedirect", "true");
+            chrome.tabs.update(tabs[0].id, { url: linkedInJobsUrl });
             return;
         }
-        
-        // Update UI immediately for better user feedback
+
+        // If we're already on the correct page, start automation
+        console.log("🚀 Starting automation from popup");
         const statusEl = document.getElementById("status");
         const startBtn = document.getElementById("start");
         const stopBtn = document.getElementById("stop");

@@ -7,6 +7,7 @@ let fab = null; // Declare fab globally so it can be accessed from anywhere
 let stepCounter = 0;
 let maxSteps = 10;
 let consecutiveEmptySteps = 0;
+let redirectionTimeout = null;
 
 // First, create a reference to both images at the top of your file
 const FAB_IMAGES = {
@@ -30,148 +31,165 @@ async function getUserSettings() {
 }
 
 window.addEventListener("load", () => {
-  if (!window.location.hostname.includes("linkedin.com")) return;
-  if (document.getElementById("autoApplyFab")) return;
-
-  const linkedInJobsUrl = "https://www.linkedin.com/jobs/search/?f_AL=true&f_E=2%2C3%2C4&f_TPR=r86400&geoId=103644278&keywords=java%20full%20stack%20developer&origin=JOB_SEARCH_PAGE_JOB_FILTER&refresh=true";
-
-  // Create the FAB
-  fab = document.createElement("button");
-  fab.id = "autoApplyFab";
-  fab.style.position = "fixed";
-  fab.style.right = "0px";
-  fab.style.top = "400px";
-  fab.style.width = "55px";
-  fab.style.height = "55px";
-  fab.style.padding = "10px";
-  fab.style.background = "linear-gradient(135deg,rgb(128, 54, 231), #0D47A1)";
-  fab.style.borderRadius = "4px";
-  // Text styling
-  fab.style.color = "#fff";
-  fab.style.fontSize = "8px";
-  fab.style.fontWeight = "600";
-  fab.style.textShadow = "0px 1px 2px rgba(0,0,0,0.3)";
-  fab.style.fontFamily = "Arial, sans-serif";
-  fab.style.letterSpacing = "0.5px";
-  fab.style.textAlign = "center";
-  // Multiple shadow effects
-  fab.style.boxShadow = 
-    "0 3px 10px rgba(0,119,181,0.3), " + // Main shadow
-    "0 8px 20px rgba(0,0,0,0.15), " +    // Outer shadow
-    "0 0 0 1px rgba(255,255,255,0.1), " + // Border glow
-    "inset 0 1px 0 rgba(255,255,255,0.2)"; // Inner highlight
-  // Border and other styling
-  fab.style.border = "none";
-  fab.style.outline = "none";
-  fab.style.zIndex = "100000";
-  fab.style.cursor = "pointer";
-  fab.style.transition = "all 0.3s ease";
-  // Hover effect
-  fab.addEventListener("mouseenter", () => {
-    fab.style.transform = "translateY(-2px)";
-    fab.style.boxShadow = 
-      "0 5px 15px rgba(0,119,181,0.4), " +
-      "0 10px 25px rgba(0,0,0,0.2), " +
-      "0 0 0 1px rgba(255,255,255,0.1), " +
-      "inset 0 1px 0 rgba(255,255,255,0.2)";
-  });
-  
-  fab.addEventListener("mouseleave", () => {
-    fab.style.transform = "translateY(0)";
-    fab.style.boxShadow = 
-      "0 3px 10px rgba(0,119,181,0.3), " +
-      "0 8px 20px rgba(0,0,0,0.15), " +
-      "0 0 0 1px rgba(255,255,255,0.1), " +
-      "inset 0 1px 0 rgba(255,255,255,0.2)";
-  });
-  
-  // Add the image to the FAB
-  const fabImage = document.createElement("img");
-  fabImage.src = FAB_IMAGES.default; // Set default image
-  fabImage.style.width = "180%";
-  fabImage.style.height = "160%";
-  fabImage.style.objectFit = "contain";
-  fabImage.style.pointerEvents = "none"; // Ensure the image doesn't interfere with button clicks
-  fabImage.style.paddingRight = "7px"; // Add padding to the right
-  fabImage.style.paddingBottom="10px";
-  fabImage.style.transform = "translateX(-4px) scale(1.4)";
-  fab.appendChild(fabImage);
-  
-  document.body.appendChild(fab);
-
-  let isDragging = false;
-  let offsetY = 0;
-
-  // Check if redirect is pending
-  const isRedirectPending = localStorage.getItem("shouldStartAfterRedirect") === "true";
-  if (window.location.href.includes("/jobs/")) {
-    if (isRedirectPending) {
-      localStorage.removeItem("shouldStartAfterRedirect");
+    if (!window.location.hostname.includes("linkedin.com")) return;  // Only run for LinkedIn domain
+    if (document.getElementById("autoApplyFab")) return;  // Ensure FAB is only created once
     
-      // Delay starting automation to ensure the page is fully loaded
-      setTimeout(() => startAutomation(), 2000);
+    const linkedInJobsUrl = "https://www.linkedin.com/jobs/search/?f_AL=true&f_E=2%2C3%2C4&f_TPR=r86400&geoId=103644278&keywords=java%20full%20stack%20developer&origin=JOB_SEARCH_PAGE_JOB_FILTER&refresh=true";
+  
+    // Create the FAB button
+    fab = document.createElement("button");
+    
+    fab.id = "autoApplyFab";
+    fab.style.position = "fixed";
+    fab.style.right = "0px";
+    fab.style.top = "400px";
+    fab.style.width = "55px";
+    fab.style.height = "55px";
+    fab.style.padding = "10px";
+    fab.style.background = "linear-gradient(135deg,rgb(128, 54, 231), #0D47A1)";
+    fab.style.borderRadius = "4px";
+    // Text styling
+    fab.style.color = "#fff";
+    fab.style.fontSize = "8px";
+    fab.style.fontWeight = "600";
+    fab.style.textShadow = "0px 1px 2px rgba(0,0,0,0.3)";
+    fab.style.fontFamily = "Arial, sans-serif";
+    fab.style.letterSpacing = "0.5px";
+    fab.style.textAlign = "center";
+    // Multiple shadow effects
+    fab.style.boxShadow = 
+      "0 3px 10px rgba(0,119,181,0.3), " + // Main shadow
+      "0 8px 20px rgba(0,0,0,0.15), " +    // Outer shadow
+      "0 0 0 1px rgba(255,255,255,0.1), " + // Border glow
+      "inset 0 1px 0 rgba(255,255,255,0.2)"; // Inner highlight
+    // Border and other styling
+    fab.style.border = "none";
+    fab.style.outline = "none";
+    fab.style.zIndex = "100000";
+    fab.style.cursor = "pointer";
+    fab.style.transition = "all 0.3s ease";
+    
+    // Hover effect
+    fab.addEventListener("mouseenter", () => {
+      fab.style.transform = "translateY(-2px)";
+      fab.style.boxShadow = 
+        "0 5px 15px rgba(0,119,181,0.4), " +
+        "0 10px 25px rgba(0,0,0,0.2), " +
+        "0 0 0 1px rgba(255,255,255,0.1), " +
+        "inset 0 1px 0 rgba(255,255,255,0.2)";
+    });
+    
+    fab.addEventListener("mouseleave", () => {
+      fab.style.transform = "translateY(0)";
+      fab.style.boxShadow = 
+        "0 3px 10px rgba(0,119,181,0.3), " +
+        "0 8px 20px rgba(0,0,0,0.15), " +
+        "0 0 0 1px rgba(255,255,255,0.1), " +
+        "inset 0 1px 0 rgba(255,255,255,0.2)";
+    });
+  
+    // Add image to FAB
+    const fabImage = document.createElement("img");
+    fabImage.src = FAB_IMAGES.default; // Set default image
+    fabImage.style.width = "180%";
+    fabImage.style.height = "160%";
+    fabImage.style.objectFit = "contain";
+    fabImage.style.pointerEvents = "none"; // Ensure the image doesn't interfere with button clicks
+    fabImage.style.paddingRight = "7px"; // Add padding to the right
+    fabImage.style.paddingBottom="10px";
+    fabImage.style.transform = "translateX(-4px) scale(1.4)";
+    fab.appendChild(fabImage);
+    
+    document.body.appendChild(fab);
+  
+    let isDragging = false;
+    let offsetY = 0;
+    
+    const shouldStartAfterRedirect = localStorage.getItem("shouldStartAfterRedirect") === "true";
+    if (shouldStartAfterRedirect && window.location.href.includes("/jobs/search")) {
+        console.log("🔄 Detected post-redirect page load, starting automation...");
+        // Clear the flag immediately
+        localStorage.removeItem("shouldStartAfterRedirect");
+        
+        // Wait for the page to fully load before starting
+        redirectionTimeout = setTimeout(async () => {
+            // Check authentication first
+            const isAuthenticated = await getUserSettings() != null;
+            if (isAuthenticated) {
+                console.log("🚀 Starting automation after redirect");
+                isRunning = true;
+                updateFabUI();
+                chrome.runtime.sendMessage({ action: "updateState", isRunning: true });
+                await startAutomation();
+            }
+        }, 3000); // Give the page 3 seconds to fully load
     }
-  }
-
-  fab.addEventListener("mousedown", (e) => {
-    isDragging = true;
-    offsetY = e.clientY - fab.getBoundingClientRect().top;
-    e.preventDefault(); // Prevent text selection during drag
-  });
-
-  document.addEventListener("mousemove", (e) => {
-    if (isDragging) {
-      e.preventDefault();
-      fab.style.top = (e.clientY - offsetY) + "px";
-    }
-  });
-
-  document.addEventListener("mouseup", () => {
-    isDragging = false;
-  });
-
-fab.addEventListener("click", async (e) => {
-    // Only handle click if we weren't dragging
-    if (isDragging) return;
-    // First check if user is authenticated
-    const isAuthenticated = await getUserSettings() == null ? false : true;
-    if (!isAuthenticated) {
-        console.log("🔒 User not authenticated, opening extension popup");
-        // Send message to open extension popup
-        chrome.runtime.sendMessage({ action: "openPopup" });
-        return;
-    }
-    const currentUrl = window.location.href;
-    if (!currentUrl.includes("/jobs")) {
-        localStorage.setItem("shouldStartAfterRedirect", "true");
-        console.log("📍 Not on jobs page, redirecting to job search URL");
-        window.location.href = linkedInJobsUrl;
-    } else {
-        if (!isRunning) {
-            console.log("🚀 Starting automation from FAB");
-            isRunning = true;
-            updateFabUI();
-            // Notify the extension popup about the state change
-            chrome.runtime.sendMessage({ action: "updateState", isRunning: true });
-            startAutomation();
-        } else {
-            console.log("⏹️ Stopping automation from FAB");
-            isRunning = false;
-            stillApplying = false;
-            updateFabUI();
-            // Add immediate cleanup
-            try {
-                const closeButtons = document.querySelectorAll('button[aria-label="Dismiss"], button.artdeco-modal__dismiss');
-                if (closeButtons.length > 0) {
-                    closeButtons[0].click();
-                }
-            } catch (e) { /* ignore */ }
-            // Notify the extension popup about the state change
-            chrome.runtime.sendMessage({ action: "updateState", isRunning: false });
+    
+    fab.addEventListener("mousedown", (e) => {
+      isDragging = true;
+      offsetY = e.clientY - fab.getBoundingClientRect().top;
+      e.preventDefault(); // Prevent text selection during drag
+    });
+  
+    document.addEventListener("mousemove", (e) => {
+      if (isDragging) {
+        e.preventDefault();
+        fab.style.top = (e.clientY - offsetY) + "px";
+      }
+    });
+  
+    document.addEventListener("mouseup", () => {
+      isDragging = false;
+    });
+  
+    fab.addEventListener("click", async (e) => {
+        if (isDragging) return;
+        
+        const isAuthenticated = await getUserSettings() != null;
+        if (!isAuthenticated) {
+            console.log("🔒 User not authenticated, opening extension popup");
+            chrome.runtime.sendMessage({ action: "openPopup" });
+            return;
         }
-    }
-});
-});
+    
+        const currentUrl = window.location.href;
+        if (!currentUrl.includes("/jobs/search/")) {
+            console.log("📍 Not on jobs page, setting redirect flag and navigating...");
+            localStorage.setItem("shouldStartAfterRedirect", "true");
+            window.location.href = linkedInJobsUrl;
+        } else {
+          if (!isRunning) {
+              console.log("🚀 Starting automation from FAB");
+              isRunning = true;
+              updateFabUI();
+              // Notify the extension popup about the state change
+              chrome.runtime.sendMessage({ action: "updateState", isRunning: true });
+              startAutomation();
+          } else {
+              console.log("⏹️ Stopping automation from FAB");
+              isRunning = false;
+              stillApplying = false;
+              updateFabUI();
+              // Add immediate cleanup
+              try {
+                  const closeButtons = document.querySelectorAll('button[aria-label="Dismiss"], button.artdeco-modal__dismiss');
+                  if (closeButtons.length > 0) {
+                      closeButtons[0].click();
+                  }
+              } catch (e) { /* ignore */ }
+              // Notify the extension popup about the state change
+              chrome.runtime.sendMessage({ action: "updateState", isRunning: false });
+          }
+      }
+    });
+    // Add cleanup for navigation events
+    window.addEventListener("beforeunload", () => {
+        if (redirectionTimeout) {
+            clearTimeout(redirectionTimeout);
+        }
+    });
+  });
+  
 
 // Update the updateFabUI function as well
 function updateFabUI() {
@@ -322,8 +340,9 @@ async function startAutomation() {
     }
 }
 
-// Helper function to handle pagination
+// Update the handlePagination function
 async function handlePagination() {
+    // First try the numbered pagination
     const paginationItems = document.querySelectorAll('.artdeco-pagination__pages .artdeco-pagination__indicator');
     const activePage = Array.from(paginationItems).find(item => item.classList.contains('active'));
     
@@ -333,24 +352,44 @@ async function handlePagination() {
             const nextButton = nextPage.querySelector('button');
             if (nextButton) {
                 const priorUrl = window.location.href;
-                console.log("✅ Found the next page button, clicking...");
+                console.log("✅ Found the next page button (numbered), clicking...");
                 nextButton.click();
                 await delay(5000);
 
                 if (priorUrl === window.location.href) {
                     console.log("❌ Page navigation failed");
-                    isRunning = false;
+                    // Don't set isRunning = false here, try alternative method
                 } else {
                     console.log("✅ Successfully navigated to next page");
                     await startAutomation();
+                    return;
                 }
-                return;
             }
         }
     }
     
-    console.log("❌ No more pages to process");
-    isRunning = false;
+    // Try the arrow navigation button if numbered pagination failed or doesn't exist
+    const nextArrowButton = document.querySelector('button[aria-label="Next"]') || 
+                          document.querySelector('button[aria-label="View next page"]');
+    
+    if (nextArrowButton) {
+        console.log("✅ Found next page arrow button, clicking...");
+        const priorUrl = window.location.href;
+        nextArrowButton.click();
+        await delay(5000);
+
+        if (priorUrl === window.location.href) {
+            console.log("❌ Arrow navigation failed");
+            isRunning = false;
+        } else {
+            console.log("✅ Successfully navigated to next page using arrow");
+            await startAutomation();
+            return;
+        }
+    } else {
+        console.log("❌ No more pages to process - no pagination found");
+        isRunning = false;
+    }
 }
 
 
