@@ -7,6 +7,7 @@ let stepCounter = 0;
 let maxSteps = 10;
 let consecutiveEmptySteps = 0;
 let redirectionTimeout = null;
+let notificationTimeout = null;
 
 // First, create a reference to both images at the top of your file
 const FAB_IMAGES = {
@@ -27,6 +28,63 @@ async function getUserSettings() {
             resolve(result.userSettings || null);
         });
     });
+}
+
+// Add this function to create and show notifications
+function showNotification(message, type = 'info') {
+    // Remove existing notification if any
+    const existingNotification = document.getElementById('linkedinAutoNotification');
+    if (existingNotification) {
+        existingNotification.remove();
+    }
+    
+    // Clear existing timeout
+    if (notificationTimeout) {
+        clearTimeout(notificationTimeout);
+    }
+
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.id = 'linkedinAutoNotification';
+    notification.style.position = 'fixed';
+    notification.style.top = '20px';
+    notification.style.right = '20px';
+    notification.style.padding = '12px 24px';
+    notification.style.borderRadius = '8px';
+    notification.style.fontSize = '14px';
+    notification.style.fontWeight = '500';
+    notification.style.zIndex = '9999';
+    notification.style.transition = 'opacity 0.3s ease';
+    notification.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+    notification.style.fontFamily = 'Arial, sans-serif';
+
+    // Set style based on notification type
+    switch (type) {
+        case 'success':
+            notification.style.backgroundColor = '#4caf50';
+            notification.style.color = 'white';
+            break;
+        case 'error':
+            notification.style.backgroundColor = '#f44336';
+            notification.style.color = 'white';
+            break;
+        case 'warning':
+            notification.style.backgroundColor = '#ff9800';
+            notification.style.color = 'white';
+            break;
+        default:
+            notification.style.backgroundColor = '#0077b5';
+            notification.style.color = 'white';
+    }
+
+    notification.textContent = message;
+    document.body.appendChild(notification);
+
+    // Remove notification after 5 seconds
+    notificationTimeout = setTimeout(() => {
+        notification.style.opacity = '0';
+        setTimeout(() => notification.remove(), 300);
+    }, 5000);
 }
 
 window.addEventListener("load", () => {
@@ -108,21 +166,25 @@ window.addEventListener("load", () => {
     const shouldStartAfterRedirect = localStorage.getItem("shouldStartAfterRedirect") === "true";
     if (shouldStartAfterRedirect && window.location.href.includes("/jobs/search")) {
         console.log("🔄 Detected post-redirect page load, starting automation...");
-        // Clear the flag immediately
         localStorage.removeItem("shouldStartAfterRedirect");
         
-        // Wait for the page to fully load before starting
-        redirectionTimeout = setTimeout(async () => {
-            // Check authentication first
-            const isAuthenticated = await getUserSettings() != null;
-            if (isAuthenticated) {
-                console.log("🚀 Starting automation after redirect");
-                isRunning = true;
-                updateFabUI();
-                chrome.runtime.sendMessage({ action: "updateState", isRunning: true });
-                await startAutomation();
+        // Wait for the page to be fully ready
+        setTimeout(async () => {
+            try {
+                const isAuthenticated = await getUserSettings() != null;
+                if (isAuthenticated) {
+                    console.log("🚀 Starting automation after redirect");
+                    isRunning = true;
+                    extensionIconClicked = true;
+                    updateFabUI();
+                    showNotification("Starting automation...", "success");
+                    await startAutomation();
+                }
+            } catch (error) {
+                console.error("Error starting automation:", error);
+                showNotification("Failed to start automation", "error");
             }
-        }, 3000); // Give the page 3 seconds to fully load
+        }, 3000);
     }
     
     fab.addEventListener("mousedown", (e) => {
@@ -226,25 +288,32 @@ function updateFabUI() {
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log("Message received:", message);
+    console.log("Message received in content script:", message);
     
     if (message.action === "start") {
         console.log("🚀 Starting LinkedIn automation");
         isRunning = true;
         extensionIconClicked = true;
-        updateFabUI(); // Update FAB UI when started from extension
-        startAutomation();
+        updateFabUI();
+        showNotification("Starting automation...", "success");
+        startAutomation().catch(error => {
+            console.error("Error in automation:", error);
+            showNotification("Automation error: " + error.message, "error");
+        });
         sendResponse({ status: "Automation started" });
-    } else if (message.action === "stop") {
+    }else if (message.action === "stop") {
         console.log("⏹️ Stopping LinkedIn automation");
         isRunning = false;
         extensionIconClicked = false;
         stillApplying = false;
         updateFabUI();
+        showNotification("Automation stopped", "warning");
         sendResponse({ status: "Automation stopped" });
     } else if (message.action === "status") {
-        // Report current status
         sendResponse({ isRunning });
+    } else if (message.action === "showNotification") {
+        showNotification(message.text, message.type);
+        sendResponse({ status: "Notification shown" });
     }
     
     return true;

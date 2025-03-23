@@ -13,31 +13,23 @@ chrome.action.onClicked.addListener((tab) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "navigateAndStart") {
-        const linkedInJobsUrl = "https://www.linkedin.com/jobs/search/?f_AL=true&f_E=2%2C3%2C4&f_TPR=r86400&geoId=103644278&keywords=java%20full%20stack%20developer&origin=JOB_SEARCH_PAGE_JOB_FILTER&refresh=true";
-        
-        // First navigate to the URL
-        chrome.tabs.update({ url: linkedInJobsUrl }, (tab) => {
-            // Wait for the page to fully load before sending the start message
-            chrome.tabs.onUpdated.addListener(function listener(tabId, changeInfo, updatedTab) {
-                if (tabId === tab.id && changeInfo.status === 'complete') {
-                    // Remove the listener to avoid multiple executions
-                    chrome.tabs.onUpdated.removeListener(listener);
-                    
-                    // Wait an additional moment to ensure content script is fully initialized
-                    setTimeout(() => {
-                        // Send the start message to the content script
-                        chrome.tabs.sendMessage(tab.id, { action: "start" })
-                            .catch(error => console.error("Error starting automation:", error));
-                    }, 2000);
-                }
+        chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+            // Update the current tab's URL
+            chrome.tabs.update(tabs[0].id, { url: message.url }, tab => {
+                // Add a listener for when the page finishes loading
+                chrome.tabs.onUpdated.addListener(function listener(tabId, changeInfo, updatedTab) {
+                    if (tabId === tab.id && changeInfo.status === 'complete') {
+                        // Remove the listener to avoid multiple executions
+                        chrome.tabs.onUpdated.removeListener(listener);
+                        
+                        // Wait a bit for the content script to initialize
+                        setTimeout(() => {
+                            chrome.tabs.sendMessage(tab.id, { action: "start" });
+                        }, 2000);
+                    }
+                });
             });
         });
-        
-        sendResponse({ status: "Navigation initiated" });
         return true;
-    }
-    if (message.action === "openPopup") {
-        // Open the extension popup
-        chrome.action.openPopup();
     }
 });

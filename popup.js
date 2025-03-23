@@ -4,7 +4,16 @@ const supabaseClient = createClient(
     window.SUPABASE_CONFIG.URL, 
     window.SUPABASE_CONFIG.ANON_KEY
 );
-
+function closePopupAndNotify(message, type = 'info') {
+    chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+        chrome.tabs.sendMessage(tabs[0].id, {
+            action: "showNotification",
+            text: message,
+            type: type
+        });
+        window.close();
+    });
+}
 document.addEventListener("DOMContentLoaded", async () => {
     try {
         // Check for existing session
@@ -152,7 +161,6 @@ async function loadUserSettings() {
         console.error("Error loading settings:", error);
         return;
     }
-
     // Store settings in chrome.storage for content script access
     chrome.storage.sync.set({ userSettings: data });
 }
@@ -168,73 +176,25 @@ function startAutomation() {
         const currentUrl = tabs[0].url;
         const linkedInJobsUrl = "https://www.linkedin.com/jobs/search/?f_AL=true&f_E=2%2C3%2C4&f_TPR=r86400&geoId=103644278&keywords=java%20full%20stack%20developer&origin=JOB_SEARCH_PAGE_JOB_FILTER&refresh=true";
         
-        // Check if we're on the correct jobs search page
         if (!currentUrl.includes("/jobs/search/")) {
-            console.log("📍 Not on desired jobs page, setting redirect flag and navigating...");
-            
-            // Update UI to show redirecting status
-            const statusEl = document.getElementById("status");
-            statusEl.innerText = "Redirecting...";
-            statusEl.style.color = "#FFA500";
-            
-            // Set redirect flag and navigate
-            localStorage.setItem("shouldStartAfterRedirect", "true");
-            chrome.tabs.update(tabs[0].id, { url: linkedInJobsUrl }, (tab) => {
-                // Listen for page load completion
-                chrome.tabs.onUpdated.addListener(function listener(tabId, changeInfo, updatedTab) {
-                    if (tabId === tab.id && changeInfo.status === 'complete') {
-                        // Remove the listener to avoid multiple executions
-                        chrome.tabs.onUpdated.removeListener(listener);
-                        
-                        // Wait for content script to initialize
-                        setTimeout(() => {
-                            // Update UI
-                            statusEl.innerText = "Running...";
-                            statusEl.style.color = "#0077b5";
-                            document.getElementById("start").disabled = true;
-                            document.getElementById("stop").disabled = false;
-                            
-                            // Start automation
-                            chrome.tabs.sendMessage(tab.id, { action: "start" });
-                        }, 2000);
-                    }
-                });
+            // Send message to background script to handle navigation and automation start
+            chrome.runtime.sendMessage({
+                action: "navigateAndStart",
+                url: linkedInJobsUrl
             });
-            return;
+            closePopupAndNotify("Redirecting to jobs page...", "info");
+        } else {
+            // If already on jobs page, start immediately
+            chrome.tabs.sendMessage(tabs[0].id, { action: "start" });
+            closePopupAndNotify("Starting automation...", "success");
         }
-
-        // If already on the correct page, start automation immediately
-        console.log("🚀 Starting automation from popup");
-        const statusEl = document.getElementById("status");
-        const startBtn = document.getElementById("start");
-        const stopBtn = document.getElementById("stop");
-        
-        statusEl.innerText = "Running...";
-        statusEl.style.color = "#0077b5";
-        startBtn.disabled = true;
-        stopBtn.disabled = false;
-        
-        chrome.tabs.sendMessage(tabs[0].id, { action: "start" }, response => {
-            console.log("Start response:", response);
-        });
     });
 }
-
 // Function to stop automation
 function stopAutomation() {
     chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-        chrome.tabs.sendMessage(tabs[0].id, { action: "stop" }, response => {
-            console.log("Stop response:", response);
-            
-            const statusEl = document.getElementById("status");
-            const startBtn = document.getElementById("start");
-            const stopBtn = document.getElementById("stop");
-            
-            statusEl.innerText = "Stopped";
-            statusEl.style.color = "#e53935";
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-        });
+        chrome.tabs.sendMessage(tabs[0].id, { action: "stop" });
+        closePopupAndNotify("Stopping automation...", "warning");
     });
 }
 
@@ -365,10 +325,9 @@ async function setupProfileManagement() {
                     default_answer: defaultAnswer 
                 }
             });
-
+            closePopupAndNotify("Settings saved successfully!", "success");
         } catch (error) {
-            console.error('Error updating profile:', error);
-            alert('Failed to update settings: ' + error.message);
+            closePopupAndNotify("Failed to save settings: " + error.message, "error");
         }
     });
 
@@ -377,17 +336,12 @@ async function setupProfileManagement() {
         try {
             const { error } = await supabaseClient.auth.signOut();
             if (error) throw error;
-            
-            // Clear chrome storage
             chrome.storage.sync.remove('userSettings');
-            
-            // Show login form
             document.getElementById('authContainer').style.display = 'block';
             document.getElementById('controls').style.display = 'none';
-            
+            closePopupAndNotify("Signed out successfully", "info");
         } catch (error) {
-            console.error('Error signing out:', error);
-            alert('Failed to sign out: ' + error.message);
+            closePopupAndNotify("Failed to sign out: " + error.message, "error");
         }
     });
 }
