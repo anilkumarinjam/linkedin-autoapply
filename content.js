@@ -281,6 +281,13 @@ function updateFabUI() {
             "inset 0 1px 0 rgba(255,255,255,0.2)";
         // Change back to default image
         if (fabImage) {
+            fabImage.style.width = "180%";
+            fabImage.style.height = "160%";
+            fabImage.style.objectFit = "contain";
+            fabImage.style.pointerEvents = "none"; // Ensure the image doesn't interfere with button clicks
+            fabImage.style.paddingRight = "7px"; // Add padding to the right
+            fabImage.style.paddingBottom="10px";
+            fabImage.style.transform = "translateX(-4px) scale(1.4)";
             fabImage.src = FAB_IMAGES.default;
         }
     }
