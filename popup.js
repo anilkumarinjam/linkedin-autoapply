@@ -177,24 +177,43 @@ function startAutomation() {
             statusEl.innerText = "Redirecting...";
             statusEl.style.color = "#FFA500";
             
-            // Set redirect flag using localStorage instead of chrome.storage.local
+            // Set redirect flag and navigate
             localStorage.setItem("shouldStartAfterRedirect", "true");
-            chrome.tabs.update(tabs[0].id, { url: linkedInJobsUrl });
+            chrome.tabs.update(tabs[0].id, { url: linkedInJobsUrl }, (tab) => {
+                // Listen for page load completion
+                chrome.tabs.onUpdated.addListener(function listener(tabId, changeInfo, updatedTab) {
+                    if (tabId === tab.id && changeInfo.status === 'complete') {
+                        // Remove the listener to avoid multiple executions
+                        chrome.tabs.onUpdated.removeListener(listener);
+                        
+                        // Wait for content script to initialize
+                        setTimeout(() => {
+                            // Update UI
+                            statusEl.innerText = "Running...";
+                            statusEl.style.color = "#0077b5";
+                            document.getElementById("start").disabled = true;
+                            document.getElementById("stop").disabled = false;
+                            
+                            // Start automation
+                            chrome.tabs.sendMessage(tab.id, { action: "start" });
+                        }, 2000);
+                    }
+                });
+            });
             return;
         }
 
-        // If we're already on the correct page, start automation
+        // If already on the correct page, start automation immediately
         console.log("🚀 Starting automation from popup");
         const statusEl = document.getElementById("status");
         const startBtn = document.getElementById("start");
         const stopBtn = document.getElementById("stop");
         
-        statusEl.innerText = "Starting...";
+        statusEl.innerText = "Running...";
         statusEl.style.color = "#0077b5";
         startBtn.disabled = true;
         stopBtn.disabled = false;
         
-        // Send start message directly to content script
         chrome.tabs.sendMessage(tabs[0].id, { action: "start" }, response => {
             console.log("Start response:", response);
         });

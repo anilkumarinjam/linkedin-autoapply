@@ -1,5 +1,4 @@
-console.log("✅ LinkedIn Auto Apply content script loaded");
-
+console.log("🔍 LinkedIn Auto Apply content script attempting to load on:", window.location.href);
 let extensionIconClicked = false;
 let isRunning = false;
 let stillApplying = false;
@@ -31,9 +30,10 @@ async function getUserSettings() {
 }
 
 window.addEventListener("load", () => {
-    if (!window.location.hostname.includes("linkedin.com")) return;  // Only run for LinkedIn domain
-    if (document.getElementById("autoApplyFab")) return;  // Ensure FAB is only created once
-    
+    if (!window.location.hostname.includes("linkedin.com")){ console.log("Not on linkedin");return; } // Only run for LinkedIn domain
+    console.log("On LinkedIn");
+    if (document.getElementById("autoApplyFab")){ console.log("Found Fab");return; } // Ensure FAB is only created once
+    console.log("creating the fab");
     const linkedInJobsUrl = "https://www.linkedin.com/jobs/search/?f_AL=true&f_E=2%2C3%2C4&f_TPR=r86400&geoId=103644278&keywords=java%20full%20stack%20developer&origin=JOB_SEARCH_PAGE_JOB_FILTER&refresh=true";
   
     // Create the FAB button
@@ -450,25 +450,87 @@ async function fillApplicationForm() {
                 input.name?.toLowerCase().includes('phone') ||
                 input.getAttribute('aria-describedby')?.toLowerCase().includes('phone') ||
                 input.placeholder?.toLowerCase().includes('phone');
-            
-            input.value = isPhoneField ? userSettings.phone_number : userSettings.default_answer;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            await delay(300);
+
+            const isLocationField = 
+                input.id?.toLowerCase().includes('location') || 
+                input.id?.toLowerCase().includes('city') || 
+                input.name?.toLowerCase().includes('location') ||
+                input.getAttribute('aria-describedby')?.toLowerCase().includes('location') ||
+                input.placeholder?.toLowerCase().includes('location');
+
+            if (isLocationField) {
+                // Set value to Texas
+                input.value = "Texas";
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                await delay(1000); // Wait for dropdown to appear
+
+                // Wait for and click the first dropdown option
+                try {
+                    // Look for dropdown elements with common LinkedIn class names
+                    const dropdownOption = await waitForElement(
+                        '.jobs-location-typeahead__suggestion, .basic-typeahead__triggered-content li:first-child, .artdeco-typeahead__dropdown li:first-child',
+                        3000
+                    );
+                    
+                    if (dropdownOption) {
+                        dropdownOption.click();
+                        await delay(500);
+                    }
+                } catch (e) {
+                    console.log("⚠️ Could not select location dropdown option:", e);
+                }
+            } else {
+                // Handle other fields as before
+                input.value = isPhoneField ? userSettings.phone_number : userSettings.default_answer;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                await delay(300);
+            }
         }
         
         // Handle textareas - restrict to modal
-        const textareas = modalContainer.querySelectorAll('textarea:not([value])');
-        for (const textarea of textareas) {
-            textarea.value = userSettings.default_answer;
-            textarea.dispatchEvent(new Event('input', { bubbles: true }));
-            await delay(300);
-        }
+        // const textareas = modalContainer.querySelectorAll('textarea:not([value])');
+        // for (const textarea of textareas) {
+        //     textarea.value = userSettings.default_answer;
+        //     textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        //     await delay(300);
+        // }
         
         // Handle dropdowns - restrict to modal
         const selects = modalContainer.querySelectorAll('select:not([value])');
         for (const select of selects) {
             if (select.options.length > 1) {
-                select.value = select.options[1].value;
+                // Get the question text from the closest label or parent fieldset
+                const questionText = (
+                    select.labels?.[0]?.textContent || 
+                    select.closest('fieldset')?.querySelector('legend')?.textContent ||
+                    select.closest('.form-group')?.querySelector('label')?.textContent ||
+                    select.getAttribute('aria-label') ||
+                    ''
+                ).toLowerCase();
+
+                const isSponsorship = questionText.includes('sponsor') || 
+                    questionText.includes('sponsorship') || 
+                    questionText.includes('work authorization') ||
+                    questionText.includes('visa') ||
+                    questionText.includes('green card') ||
+                    questionText.includes('citizen');
+
+                // For sponsorship questions, try to find "No" option
+                if (isSponsorship) {
+                    console.log("📝 Sponsorship question detected, selecting No");
+                    // Try to find a "No" option
+                    const noOptionIndex = Array.from(select.options)
+                        .findIndex(option => option.text.toLowerCase().includes('no'));
+                    
+                    // If "No" option found, use it; otherwise use the last option
+                    select.value = noOptionIndex !== -1 ? 
+                        select.options[noOptionIndex].value : 
+                        select.options[select.options.length - 1].value;
+                } else {
+                    // For non-sponsorship questions, select the first non-empty option
+                    select.value = select.options[1].value;
+                }
+                
                 select.dispatchEvent(new Event('change', { bubbles: true }));
                 await delay(300);
             }
@@ -484,7 +546,9 @@ async function fillApplicationForm() {
                 const isSponsorship = questionText.includes('sponsor') || 
                                       questionText.includes('sponsorship') || 
                                       questionText.includes('work authorization') ||
-                                      questionText.includes('visa');
+                                      questionText.includes('visa')||
+                                      questionText.includes('green card')||
+                                      questionText.includes('citizen');
                 
                 if (isSponsorship) {
                     // For sponsorship questions, try to find "No" option
