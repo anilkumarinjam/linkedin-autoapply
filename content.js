@@ -65,63 +65,64 @@ async function checkAuthentication() {
 }
 
 // Add this function to create and show notifications
-function showNotification(message, type = 'info', duration = 5000) {
+function showNotification(message, type = 'info', duration = 5000, isHTML = false) {
     // Remove existing notification if any
     const existingNotification = document.getElementById('linkedinAutoNotification');
     if (existingNotification) {
         existingNotification.remove();
     }
     
-    // Clear existing timeout
     if (notificationTimeout) {
         clearTimeout(notificationTimeout);
     }
 
-    // Create notification element
     const notification = document.createElement('div');
     notification.id = 'linkedinAutoNotification';
     notification.style.position = 'fixed';
     notification.style.top = '20px';
     notification.style.right = '20px';
-    notification.style.padding = '12px 24px';
-    notification.style.borderRadius = '8px';
-    notification.style.fontSize = '14px';
-    notification.style.fontWeight = '500';
-    notification.style.zIndex = '9999999'; // Increased z-index
-    notification.style.transition = 'opacity 0.3s ease';
-    notification.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
-    notification.style.fontFamily = 'Arial, sans-serif';
-    notification.style.maxWidth = '400px'; // Added max-width
-    notification.style.whiteSpace = 'pre-wrap'; // Preserve line breaks
-    notification.style.lineHeight = '1.5'; // Better readability
-    notification.style.backdropFilter = 'blur(5px)'; // Add blur effect behind notification
-    notification.style.border = '1px solid rgba(255,255,255,0.1)'; // Subtle border
+    notification.style.zIndex = '9999999';
+    notification.style.transition = 'all 0.3s ease';
+    notification.style.maxWidth = '400px';
+    notification.style.minWidth = '300px';
+    notification.style.boxShadow = '0 8px 32px rgba(0,0,0,0.2)';
+    notification.style.backdropFilter = 'blur(8px)';
 
-    // Set style based on notification type
-    switch (type) {
-        case 'success':
-            notification.style.backgroundColor = 'rgba(76, 175, 80, 0.95)';
-            notification.style.color = 'white';
-            break;
-        case 'error':
-            notification.style.backgroundColor = 'rgba(244, 67, 54, 0.95)';
-            notification.style.color = 'white';
-            break;
-        case 'warning':
-            notification.style.backgroundColor = 'rgba(255, 152, 0, 0.95)';
-            notification.style.color = 'white';
-            break;
-        default:
-            notification.style.backgroundColor = 'rgba(0, 119, 181, 0.95)';
-            notification.style.color = 'white';
+    if (isHTML) {
+        notification.innerHTML = message;
+    } else {
+        notification.style.padding = '12px 24px';
+        notification.style.borderRadius = '8px';
+        notification.style.fontSize = '14px';
+        notification.style.fontWeight = '500';
+        notification.style.fontFamily = "'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        notification.textContent = message;
+
+        // Set style based on notification type
+        switch (type) {
+            case 'success':
+                notification.style.background = 'linear-gradient(135deg, rgba(76, 175, 80, 0.95), rgba(56, 142, 60, 0.95))';
+                notification.style.color = 'white';
+                break;
+            case 'error':
+                notification.style.background = 'linear-gradient(135deg, rgba(244, 67, 54, 0.95), rgba(183, 28, 28, 0.95))';
+                notification.style.color = 'white';
+                break;
+            case 'warning':
+                notification.style.background = 'linear-gradient(135deg, rgba(255, 152, 0, 0.95), rgba(230, 81, 0, 0.95))';
+                notification.style.color = 'white';
+                break;
+            default:
+                notification.style.background = 'linear-gradient(135deg, rgba(33, 150, 243, 0.95), rgba(13, 71, 161, 0.95))';
+                notification.style.color = 'white';
+        }
     }
 
-    notification.textContent = message;
     document.body.appendChild(notification);
 
-    // Remove notification after specified duration
     notificationTimeout = setTimeout(() => {
         notification.style.opacity = '0';
+        notification.style.transform = 'translateX(100%)';
         setTimeout(() => notification.remove(), 300);
     }, duration);
 }
@@ -264,6 +265,7 @@ window.addEventListener("load", () => {
                     console.log("🚀 Starting automation from FAB");
                     isRunning = true;
                     updateFabUI();
+                    if(jobTracker) jobTracker.resetSessionStats();
                     chrome.runtime.sendMessage({ action: "updateState", isRunning: true });
                     startAutomation();
                 } else {
@@ -464,7 +466,11 @@ async function startAutomation() {
         }
     } catch (error) {
         if (error.message === "Daily application limit reached") {
+            console.log("🚫 Daily limit reached - stopping automation");
             isRunning = false;
+            stillApplying = false;
+            updateFabUI();
+            chrome.runtime.sendMessage({ action: "updateState", isRunning: false });
             showNotification("Daily application limit reached (50 applications). Try again tomorrow!", "warning");
             jobTracker.showReport();
             return;
@@ -475,6 +481,7 @@ async function startAutomation() {
         }
         console.error("❌ Fatal error in automation:", error);
         isRunning = false;
+        updateFabUI();
     }
 }
 
@@ -960,8 +967,8 @@ async function processApplicationSteps() {
             await discardApplication();
         }
         
-        console.log("✅ Application process completed");
-        await jobTracker.incrementJobCount('success');
+        // console.log("✅ Application process completed");
+        // await jobTracker.incrementJobCount('success');
         
     } catch (processError) {
         if (processError.message === "AUTOMATION_STOPPED") {
@@ -982,26 +989,33 @@ async function processApplicationSteps() {
 // Add to content.js
 class JobTracker {
     constructor() {
-        this.sessionStats = {
+        // Initialize session stats from localStorage or create new
+        const sessionKey = 'linkedinAutoApply_currentSession';
+        const storedSession = localStorage.getItem(sessionKey);
+        
+        this.sessionStats = storedSession ? JSON.parse(storedSession) : {
             totalAttempted: 0,
             successfullyApplied: 0,
             failed: 0,
             skipped: 0
         };
-        this.dailyLimit = 50;
+        
+        this.dailyLimit = 100;
+        this.sessionKey = sessionKey;
     }
 
     async initialize() {
-        // Load today's stats from localStorage
+        // Existing daily stats initialization code...
         const today = new Date().toISOString().split('T')[0];
         const storedStats = localStorage.getItem(`linkedinAutoApply_${today}`);
+        
         if (storedStats) {
             const stats = JSON.parse(storedStats);
             if (stats.appliedCount >= this.dailyLimit) {
+                console.log("🚫 Daily limit reached:", stats.appliedCount);
                 throw new Error("Daily application limit reached");
             }
         } else {
-            // Initialize today's stats
             localStorage.setItem(`linkedinAutoApply_${today}`, JSON.stringify({
                 appliedCount: 0,
                 lastUpdated: new Date().toISOString()
@@ -1010,78 +1024,151 @@ class JobTracker {
     }
 
     async incrementJobCount(status) {
-        // Update session stats
-        this.sessionStats.totalAttempted++;
-        switch (status) {
-            case 'success':
-                this.sessionStats.successfullyApplied++;
-                await this.incrementDailyCount();
-                break;
-            case 'failed':
-                this.sessionStats.failed++;
-                break;
-            case 'skipped':
-                this.sessionStats.skipped++;
-                break;
+        try {
+            // Update session stats
+            this.sessionStats.totalAttempted++;
+            switch (status) {
+                case 'success':
+                    this.sessionStats.successfullyApplied++;
+                    await this.incrementDailyCount();
+                    break;
+                case 'failed':
+                    this.sessionStats.failed++;
+                    break;
+                case 'skipped':
+                    this.sessionStats.skipped++;
+                    break;
+            }
+
+            // Save updated session stats to localStorage
+            localStorage.setItem(this.sessionKey, JSON.stringify(this.sessionStats));
+            console.log("📊 Updated session stats:", this.sessionStats);
+
+        } catch (error) {
+            console.error("Error incrementing job count:", error);
+            if (error.message === "Daily application limit reached") {
+                throw error;
+            }
         }
+    }
+
+    // Add method to reset session stats
+    resetSessionStats() {
+        this.sessionStats = {
+            totalAttempted: 0,
+            successfullyApplied: 0,
+            failed: 0,
+            skipped: 0
+        };
+        localStorage.setItem(this.sessionKey, JSON.stringify(this.sessionStats));
     }
 
     async incrementDailyCount() {
         const today = new Date().toISOString().split('T')[0];
         const storedStats = localStorage.getItem(`linkedinAutoApply_${today}`);
+        
         if (storedStats) {
             const stats = JSON.parse(storedStats);
             stats.appliedCount++;
             stats.lastUpdated = new Date().toISOString();
-            localStorage.setItem(`linkedinAutoApply_${today}`, JSON.stringify(stats));
             
+            // Check if we've hit the limit
             if (stats.appliedCount >= this.dailyLimit) {
-                await this.updateDatabaseLimit();
+                // Store the updated count before throwing the error
+                localStorage.setItem(`linkedinAutoApply_${today}`, JSON.stringify(stats));
+                // Notify background script about limit reached
+                chrome.runtime.sendMessage({ 
+                    action: "dailyLimitReached", 
+                    date: today,
+                    count: stats.appliedCount 
+                });
                 throw new Error("Daily application limit reached");
             }
-        }
-    }
-
-    async updateDatabaseLimit() {
-        try {
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            if (!session) return;
-
-            const { error } = await supabaseClient
-                .from('user_settings')
-                .update({ daily_limit_reached: true })
-                .eq('user_id', session.user.id);
-
-            if (error) throw error;
-        } catch (error) {
-            console.error("Error updating daily limit in database:", error);
+            
+            localStorage.setItem(`linkedinAutoApply_${today}`, JSON.stringify(stats));
         }
     }
 
     generateReport() {
+        const today = new Date().toISOString().split('T')[0];
+        const storedStats = localStorage.getItem(`linkedinAutoApply_${today}`);
+        const dailyStats = storedStats ? JSON.parse(storedStats) : { appliedCount: 0 };
+
         return {
             sessionStats: this.sessionStats,
-            dailyLimit: this.dailyLimit,
-            remainingApplications: this.dailyLimit - this.sessionStats.successfullyApplied
+            dailyStats: {
+                appliedToday: dailyStats.appliedCount,
+                remainingToday: Math.max(0, this.dailyLimit - dailyStats.appliedCount)
+            },
+            dailyLimit: this.dailyLimit
         };
     }
 
     showReport() {
         const report = this.generateReport();
-        const message = `
-🤖 LinkedIn Auto Apply Report:
-
-📊 Session Statistics:
-• Total Jobs Attempted: ${report.sessionStats.totalAttempted}
-• Successfully Applied: ${report.sessionStats.successfullyApplied}
-• Failed Applications: ${report.sessionStats.failed}
-• Skipped Jobs: ${report.sessionStats.skipped}
-
-⚠️ Daily Limit: ${report.dailyLimit}
-✅ Remaining Applications: ${report.remainingApplications}
+        const htmlContent = `
+            <div style="
+                font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                padding: 16px 20px;
+                border-radius: 12px;
+                background: linear-gradient(135deg, rgba(79, 55, 211, 0.95), rgba(13, 71, 161, 0.95));
+                color: white;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+                border: 1px solid rgba(255,255,255,0.18);
+                backdrop-filter: blur(8px);
+            ">
+                <div style="
+                    font-size: 18px;
+                    font-weight: 600;
+                    margin-bottom: 15px;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                ">
+                    🤖 <span style="
+                        background: linear-gradient(90deg, #fff, #e0e0e0);
+                        -webkit-background-clip: text;
+                        color: transparent;
+                    ">LinkedIn Auto Apply Report</span>
+                </div>
+    
+                <div style="
+                    background: rgba(255,255,255,0.1);
+                    border-radius: 8px;
+                    padding: 12px;
+                    margin-bottom: 12px;
+                ">
+                    <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">📊 Session Statistics</div>
+                    <div style="display: grid; grid-template-columns: auto auto; gap: 8px;">
+                        <div>Total Attempted:</div>
+                        <div style="font-weight: 500;">${report.sessionStats.totalAttempted}</div>
+                        <div>Successfully Applied:</div>
+                        <div style="font-weight: 500; color: #4CAF50;">${report.sessionStats.successfullyApplied}</div>
+                        <div>Failed Applications:</div>
+                        <div style="font-weight: 500; color: #FF5252;">${report.sessionStats.failed}</div>
+                        <div>Skipped Jobs:</div>
+                        <div style="font-weight: 500; color: #FFC107;">${report.sessionStats.skipped}</div>
+                    </div>
+                </div>
+    
+                <div style="
+                    background: rgba(255,255,255,0.1);
+                    border-radius: 8px;
+                    padding: 12px;
+                ">
+                    <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">📅 Daily Progress</div>
+                    <div style="display: grid; grid-template-columns: auto auto; gap: 8px;">
+                        <div>Applied Today:</div>
+                        <div style="font-weight: 500;">${report.dailyStats.appliedToday}</div>
+                        <div>Remaining Today:</div>
+                        <div style="font-weight: 500; color: #81D4FA;">${report.dailyStats.remainingToday}</div>
+                        <div>Daily Limit:</div>
+                        <div style="font-weight: 500; color: #FFB74D;">${report.dailyLimit}</div>
+                    </div>
+                </div>
+            </div>
         `;
-
-        showNotification(message, "info", 10000); // Show for 10 seconds
+    
+        showNotification(htmlContent, "info", 20000, true);
     }
 }
-
