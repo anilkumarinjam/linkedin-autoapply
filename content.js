@@ -8,7 +8,7 @@ let maxSteps = 10;
 let consecutiveEmptySteps = 0;
 let redirectionTimeout = null;
 let notificationTimeout = null;
-
+let jobTracker=null;
 // First, create a reference to both images at the top of your file
 const FAB_IMAGES = {
     default: chrome.runtime.getURL("icons/ai_auto.png"),
@@ -65,7 +65,7 @@ async function checkAuthentication() {
 }
 
 // Add this function to create and show notifications
-function showNotification(message, type = 'info') {
+function showNotification(message, type = 'info', duration = 5000) {
     // Remove existing notification if any
     const existingNotification = document.getElementById('linkedinAutoNotification');
     if (existingNotification) {
@@ -87,38 +87,43 @@ function showNotification(message, type = 'info') {
     notification.style.borderRadius = '8px';
     notification.style.fontSize = '14px';
     notification.style.fontWeight = '500';
-    notification.style.zIndex = '9999';
+    notification.style.zIndex = '9999999'; // Increased z-index
     notification.style.transition = 'opacity 0.3s ease';
     notification.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
     notification.style.fontFamily = 'Arial, sans-serif';
+    notification.style.maxWidth = '400px'; // Added max-width
+    notification.style.whiteSpace = 'pre-wrap'; // Preserve line breaks
+    notification.style.lineHeight = '1.5'; // Better readability
+    notification.style.backdropFilter = 'blur(5px)'; // Add blur effect behind notification
+    notification.style.border = '1px solid rgba(255,255,255,0.1)'; // Subtle border
 
     // Set style based on notification type
     switch (type) {
         case 'success':
-            notification.style.backgroundColor = '#4caf50';
+            notification.style.backgroundColor = 'rgba(76, 175, 80, 0.95)';
             notification.style.color = 'white';
             break;
         case 'error':
-            notification.style.backgroundColor = '#f44336';
+            notification.style.backgroundColor = 'rgba(244, 67, 54, 0.95)';
             notification.style.color = 'white';
             break;
         case 'warning':
-            notification.style.backgroundColor = '#ff9800';
+            notification.style.backgroundColor = 'rgba(255, 152, 0, 0.95)';
             notification.style.color = 'white';
             break;
         default:
-            notification.style.backgroundColor = '#0077b5';
+            notification.style.backgroundColor = 'rgba(0, 119, 181, 0.95)';
             notification.style.color = 'white';
     }
 
     notification.textContent = message;
     document.body.appendChild(notification);
 
-    // Remove notification after 5 seconds
+    // Remove notification after specified duration
     notificationTimeout = setTimeout(() => {
         notification.style.opacity = '0';
         setTimeout(() => notification.remove(), 300);
-    }, 5000);
+    }, duration);
 }
 
 window.addEventListener("load", () => {
@@ -266,7 +271,9 @@ window.addEventListener("load", () => {
                     isRunning = false;
                     stillApplying = false;
                     updateFabUI();
-    
+                    if (jobTracker) {// Show the report when stopping
+                        jobTracker.showReport();
+                    }
                     try {
                         const closeButtons = document.querySelectorAll('button[aria-label="Dismiss"], button.artdeco-modal__dismiss');
                         if (closeButtons.length > 0) {
@@ -362,6 +369,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else if (message.action === "showNotification") {
         showNotification(message.text, message.type);
         sendResponse({ status: "Notification shown" });
+    }else if (message.action === "generateReport") {
+        if (jobTracker) {
+            jobTracker.showReport();
+        }
+        sendResponse({ status: "Report generated" });
     }
     
     return true;
@@ -375,10 +387,13 @@ function resetApplicationState() {
 
 // Update startAutomation to reset state before processing
 async function startAutomation() {
-    resetApplicationState();
     try {
-        checkIfShouldStop(); // Check if automation should stop at the beginning
+        // Initialize job tracker
+        jobTracker = new JobTracker();
+        await jobTracker.initialize();
         
+        resetApplicationState();
+        checkIfShouldStop();        
         // Look for job cards with fh-webext-job-display attribute
         const jobCards = document.querySelectorAll('li[fh-webext-job-display]');
         checkIfShouldStop(); // Check if automation should stop after job cards are found
@@ -448,6 +463,12 @@ async function startAutomation() {
             await startAutomation();
         }
     } catch (error) {
+        if (error.message === "Daily application limit reached") {
+            isRunning = false;
+            showNotification("Daily application limit reached (50 applications). Try again tomorrow!", "warning");
+            jobTracker.showReport();
+            return;
+        }
         if (error.message === "AUTOMATION_STOPPED") {
             console.log("🛑 Automation stopped successfully");
             return;
@@ -743,7 +764,6 @@ async function discardApplication() {
 
 async function processApplicationSteps() {
     console.log("⏩ Processing application steps...");
-    
     try {
         while (stillApplying && stepCounter <= maxSteps) {
             checkIfShouldStop(); // Check if automation should stop before each step
@@ -769,6 +789,7 @@ async function processApplicationSteps() {
                 
                 if (isCompleted) {
                     console.log("🎉 Application completion message detected!");
+                    await jobTracker.incrementJobCount('success');
                     stillApplying = false;
                     
                     // Try to close any remaining dialogs
@@ -825,6 +846,7 @@ async function processApplicationSteps() {
                     if (!formFilled) {
                         console.log("❌ Form filling failed, discarding application");
                         await discardApplication();
+                        await jobTracker.incrementJobCount('failed');
                         stillApplying = false;
                         break;
                     }
@@ -849,6 +871,7 @@ async function processApplicationSteps() {
                     }
                     
                     console.log("✅ Application process completed");
+                    await jobTracker.incrementJobCount('success');
                     break;
                 }
                 
@@ -859,6 +882,7 @@ async function processApplicationSteps() {
                     stillApplying = false;
                     await delay(2000);
                     console.log("✅ Application process completed");
+                    await jobTracker.incrementJobCount('success');
                     break;
                 }
                 else if (reviewButton) {
@@ -892,6 +916,7 @@ async function processApplicationSteps() {
                         if (consecutiveEmptySteps >= 3) {
                             console.log("❌ Too many consecutive steps without buttons, discarding application");
                             await discardApplication();
+                            await jobTracker.incrementJobCount('failed');
                             stillApplying = false;
                             break;
                         }
@@ -921,6 +946,7 @@ async function processApplicationSteps() {
                 if (stepCounter > 8) {
                     console.log("❌ Too many steps with errors, discarding application");
                     await discardApplication();
+                    await jobTracker.incrementJobCount('failed');
                     stillApplying = false;
                     break;
                 }
@@ -930,17 +956,19 @@ async function processApplicationSteps() {
         // If we exited the loop because we hit max steps, try to close any open dialogs
         if (stepCounter > maxSteps) {
             console.log("⚠️ Reached maximum steps without completing application, discarding");
+            await jobTracker.incrementJobCount('failed');
             await discardApplication();
         }
         
         console.log("✅ Application process completed");
+        await jobTracker.incrementJobCount('success');
         
     } catch (processError) {
         if (processError.message === "AUTOMATION_STOPPED") {
             return;
         }
         console.error("❌ Fatal error in application process:", processError);
-        
+        await jobTracker.incrementJobCount('failed');
         // Try to close any open dialogs on error
         try {
             const closeButtons = document.querySelectorAll('button[aria-label="Dismiss"], button.artdeco-modal__dismiss');
@@ -951,4 +979,109 @@ async function processApplicationSteps() {
     }
 }
 
+// Add to content.js
+class JobTracker {
+    constructor() {
+        this.sessionStats = {
+            totalAttempted: 0,
+            successfullyApplied: 0,
+            failed: 0,
+            skipped: 0
+        };
+        this.dailyLimit = 50;
+    }
+
+    async initialize() {
+        // Load today's stats from localStorage
+        const today = new Date().toISOString().split('T')[0];
+        const storedStats = localStorage.getItem(`linkedinAutoApply_${today}`);
+        if (storedStats) {
+            const stats = JSON.parse(storedStats);
+            if (stats.appliedCount >= this.dailyLimit) {
+                throw new Error("Daily application limit reached");
+            }
+        } else {
+            // Initialize today's stats
+            localStorage.setItem(`linkedinAutoApply_${today}`, JSON.stringify({
+                appliedCount: 0,
+                lastUpdated: new Date().toISOString()
+            }));
+        }
+    }
+
+    async incrementJobCount(status) {
+        // Update session stats
+        this.sessionStats.totalAttempted++;
+        switch (status) {
+            case 'success':
+                this.sessionStats.successfullyApplied++;
+                await this.incrementDailyCount();
+                break;
+            case 'failed':
+                this.sessionStats.failed++;
+                break;
+            case 'skipped':
+                this.sessionStats.skipped++;
+                break;
+        }
+    }
+
+    async incrementDailyCount() {
+        const today = new Date().toISOString().split('T')[0];
+        const storedStats = localStorage.getItem(`linkedinAutoApply_${today}`);
+        if (storedStats) {
+            const stats = JSON.parse(storedStats);
+            stats.appliedCount++;
+            stats.lastUpdated = new Date().toISOString();
+            localStorage.setItem(`linkedinAutoApply_${today}`, JSON.stringify(stats));
+            
+            if (stats.appliedCount >= this.dailyLimit) {
+                await this.updateDatabaseLimit();
+                throw new Error("Daily application limit reached");
+            }
+        }
+    }
+
+    async updateDatabaseLimit() {
+        try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (!session) return;
+
+            const { error } = await supabaseClient
+                .from('user_settings')
+                .update({ daily_limit_reached: true })
+                .eq('user_id', session.user.id);
+
+            if (error) throw error;
+        } catch (error) {
+            console.error("Error updating daily limit in database:", error);
+        }
+    }
+
+    generateReport() {
+        return {
+            sessionStats: this.sessionStats,
+            dailyLimit: this.dailyLimit,
+            remainingApplications: this.dailyLimit - this.sessionStats.successfullyApplied
+        };
+    }
+
+    showReport() {
+        const report = this.generateReport();
+        const message = `
+🤖 LinkedIn Auto Apply Report:
+
+📊 Session Statistics:
+• Total Jobs Attempted: ${report.sessionStats.totalAttempted}
+• Successfully Applied: ${report.sessionStats.successfullyApplied}
+• Failed Applications: ${report.sessionStats.failed}
+• Skipped Jobs: ${report.sessionStats.skipped}
+
+⚠️ Daily Limit: ${report.dailyLimit}
+✅ Remaining Applications: ${report.remainingApplications}
+        `;
+
+        showNotification(message, "info", 10000); // Show for 10 seconds
+    }
+}
 

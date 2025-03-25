@@ -194,6 +194,7 @@ function startAutomation() {
 function stopAutomation() {
     chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
         chrome.tabs.sendMessage(tabs[0].id, { action: "stop" });
+        chrome.tabs.sendMessage(tabs[0].id, { action: "generateReport" });
         closePopupAndNotify("Stopping automation...", "warning");
     });
 }
