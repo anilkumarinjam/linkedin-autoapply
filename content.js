@@ -24,10 +24,44 @@ function checkIfShouldStop() {
 
 async function getUserSettings() {
     return new Promise((resolve) => {
-        chrome.storage.sync.get(['userSettings'], (result) => {
-            resolve(result.userSettings || null);
-        });
+        try {
+            // Check if chrome.storage is available
+            if (!chrome?.storage?.sync) {
+                console.error("⚠️ Chrome storage API not available");
+                resolve(null);
+                return;
+            }
+
+            chrome.storage.sync.get(['userSettings'], (result) => {
+                if (chrome.runtime.lastError) {
+                    console.error("⚠️ Error accessing storage:", chrome.runtime.lastError);
+                    resolve(null);
+                    return;
+                }
+                resolve(result.userSettings || null);
+            });
+        } catch (error) {
+            console.error("⚠️ Error in getUserSettings:", error);
+            resolve(null);
+        }
     });
+}
+
+// Add this helper function to check authentication status
+async function checkAuthentication() {
+    try {
+        const settings = await getUserSettings();
+        if (!settings) {
+            console.log("🔒 User not authenticated");
+            showNotification("Please authenticate first", "warning");
+            return false;
+        }
+        return true;
+    } catch (error) {
+        console.error("❌ Error checking authentication:", error);
+        showNotification("Authentication error", "error");
+        return false;
+    }
 }
 
 // Add this function to create and show notifications
@@ -206,44 +240,51 @@ window.addEventListener("load", () => {
   
     fab.addEventListener("click", async (e) => {
         if (isDragging) return;
-        
-        const isAuthenticated = await getUserSettings() != null;
-        if (!isAuthenticated) {
-            console.log("🔒 User not authenticated, opening extension popup");
-            chrome.runtime.sendMessage({ action: "openPopup" });
-            return;
-        }
     
-        const currentUrl = window.location.href;
-        if (!currentUrl.includes("/jobs/search/")) {
-            console.log("📍 Not on jobs page, setting redirect flag and navigating...");
-            localStorage.setItem("shouldStartAfterRedirect", "true");
-            window.location.href = linkedInJobsUrl;
-        } else {
-          if (!isRunning) {
-              console.log("🚀 Starting automation from FAB");
-              isRunning = true;
-              updateFabUI();
-              // Notify the extension popup about the state change
-              chrome.runtime.sendMessage({ action: "updateState", isRunning: true });
-              startAutomation();
-          } else {
-              console.log("⏹️ Stopping automation from FAB");
-              isRunning = false;
-              stillApplying = false;
-              updateFabUI();
-              // Add immediate cleanup
-              try {
-                  const closeButtons = document.querySelectorAll('button[aria-label="Dismiss"], button.artdeco-modal__dismiss');
-                  if (closeButtons.length > 0) {
-                      closeButtons[0].click();
-                  }
-              } catch (e) { /* ignore */ }
-              // Notify the extension popup about the state change
-              chrome.runtime.sendMessage({ action: "updateState", isRunning: false });
-          }
-      }
+        try {
+            const isAuthenticated = await checkAuthentication();
+            if (!isAuthenticated) {
+                console.log("🔒 User not authenticated, opening extension popup");
+                chrome.runtime.sendMessage({ action: "openPopup" });
+                return;
+            }
+    
+            const currentUrl = window.location.href;
+            if (!currentUrl.includes("/jobs/search/")) {
+                console.log("📍 Not on jobs page, setting redirect flag and navigating...");
+                localStorage.setItem("shouldStartAfterRedirect", "true");
+                window.location.href = linkedInJobsUrl;
+            } else {
+                if (!isRunning) {
+                    console.log("🚀 Starting automation from FAB");
+                    isRunning = true;
+                    updateFabUI();
+                    chrome.runtime.sendMessage({ action: "updateState", isRunning: true });
+                    startAutomation();
+                } else {
+                    console.log("⏹️ Stopping automation from FAB");
+                    isRunning = false;
+                    stillApplying = false;
+                    updateFabUI();
+    
+                    try {
+                        const closeButtons = document.querySelectorAll('button[aria-label="Dismiss"], button.artdeco-modal__dismiss');
+                        if (closeButtons.length > 0) {
+                            closeButtons[0].click();
+                        }
+                    } catch (e) {
+                        // silently ignore
+                    }
+    
+                    chrome.runtime.sendMessage({ action: "updateState", isRunning: false });
+                }
+            }
+        } catch (error) {
+            console.error("❌ Error in click handler:", error);
+            showNotification("An error occurred", "error");
+        }
     });
+    
     // Add cleanup for navigation events
     window.addEventListener("beforeunload", () => {
         if (redirectionTimeout) {
@@ -520,7 +561,10 @@ async function fillApplicationForm() {
         // Handle text fields - restrict to modal
         const textInputs = modalContainer.querySelectorAll('input[type="text"]:not([value]), input[type="tel"]:not([value]), input[type="email"]:not([value])');
         for (const input of textInputs) {
-            // Check for phone number fields using multiple identifiers
+            if (input.value.trim()) {
+                console.log(`⏩ Skipping pre-filled field: ${input.name || input.id || 'unnamed field'}`);
+                continue;
+            }
             const isPhoneField = 
                 input.id?.toLowerCase().includes('phone') || 
                 input.name?.toLowerCase().includes('phone') ||
@@ -562,19 +606,14 @@ async function fillApplicationForm() {
                 await delay(300);
             }
         }
-        
-        // Handle textareas - restrict to modal
-        // const textareas = modalContainer.querySelectorAll('textarea:not([value])');
-        // for (const textarea of textareas) {
-        //     textarea.value = userSettings.default_answer;
-        //     textarea.dispatchEvent(new Event('input', { bubbles: true }));
-        //     await delay(300);
-        // }
-        
         // Handle dropdowns - restrict to modal
         const selects = modalContainer.querySelectorAll('select:not([value])');
         for (const select of selects) {
             if (select.options.length > 1) {
+                if (select.value && select.value !== select.options[0].value) {
+                    console.log(`⏩ Skipping pre-selected dropdown: ${select.name || select.id || 'unnamed select'}`);
+                    continue;
+                }
                 // Get the question text from the closest label or parent fieldset
                 const questionText = (
                     select.labels?.[0]?.textContent || 
@@ -589,7 +628,8 @@ async function fillApplicationForm() {
                     questionText.includes('work authorization') ||
                     questionText.includes('visa') ||
                     questionText.includes('green card') ||
-                    questionText.includes('citizen');
+                    questionText.includes('citizen') ||
+                    questionText.includes('clearance');
 
                 // For sponsorship questions, try to find "No" option
                 if (isSponsorship) {
@@ -617,6 +657,10 @@ async function fillApplicationForm() {
         for (const group of radioGroups) {
             const radios = group.querySelectorAll('input[type="radio"]');
             if (radios.length > 0 && !Array.from(radios).some(r => r.checked)) {
+                if (Array.from(radios).some(r => r.checked)) {
+                    console.log('⏩ Skipping pre-selected radio group');
+                    continue;
+                }
                 // Get the question text to check for sponsorship
                 const questionText = group.textContent.toLowerCase() || '';
                 const isSponsorship = questionText.includes('sponsor') || 
@@ -634,13 +678,8 @@ async function fillApplicationForm() {
                         r.id.toLowerCase().includes("no")
                     );
                     
-                    if (noOption) {
-                        noOption.click();
-                    } else {
-                        // If can't find explicit "No", choose the last option
-                        // (often "No" is the second option)
-                        radios[radios.length - 1].click();
-                    }
+                    if (noOption) noOption.click();
+                    else radios[radios.length - 1].click(); // (often "No" is the second option)
                 } else {
                     // For all other questions, try to find "Yes" option
                     console.log("📝 Standard question, selecting Yes");
@@ -648,15 +687,9 @@ async function fillApplicationForm() {
                         r.value.toLowerCase() === "yes" || 
                         r.id.toLowerCase().includes("yes")
                     );
-                    
-                    if (yesOption) {
-                        yesOption.click();
-                    } else {
-                        // If can't find explicit "Yes", choose the first option
-                        radios[0].click();
-                    }
+                    if (yesOption) yesOption.click();
+                    else radios[0].click();
                 }
-                
                 await delay(300);
             }
         }
@@ -664,6 +697,10 @@ async function fillApplicationForm() {
         // Handle checkboxes - restrict to modal
         const checkboxes = modalContainer.querySelectorAll('input[type="checkbox"]:not(:checked)');
         for (const checkbox of checkboxes) {
+            if (checkbox.checked || checkbox.name === "jobDetailsEasyApplyTopChoiceCheckbox") {
+                console.log(`⏩ Skipping pre-checked checkbox: ${checkbox.name || checkbox.id || 'unnamed checkbox'}`);
+                continue;
+            }
             if (checkbox.name !== "jobDetailsEasyApplyTopChoiceCheckbox") {
                 checkbox.click();
                 await delay(300);
@@ -675,6 +712,32 @@ async function fillApplicationForm() {
     } catch (error) {
         console.error("❌ Error filling application form:", error);
         return false; // Indicate failure to fill the form
+    }
+}
+async function discardApplication() {
+    console.log("🚫 Discarding current application...");
+    try {
+        // First click the cancel button
+        const cancelButton = document.querySelector('button[aria-label="Dismiss"]');
+        if (cancelButton) {
+            console.log("✅ Clicking cancel button");
+            cancelButton.click();
+            await delay(1000);
+        }
+
+        // Then click the discard button
+        const discardButton = document.querySelector('button[data-control-name="discard_application_confirm_btn"]');
+        if (discardButton) {
+            console.log("✅ Clicking discard button");
+            discardButton.click();
+            await delay(1000);
+        }
+        
+        console.log("✅ Application discarded successfully");
+        return true;
+    } catch (error) {
+        console.error("❌ Error while discarding application:", error);
+        return false;
     }
 }
 
@@ -760,19 +823,9 @@ async function processApplicationSteps() {
                     checkIfShouldStop(); // Check if automation should stop after form filling
                     
                     if (!formFilled) {
-                        console.log("❌ Form filling failed, ending process");
+                        console.log("❌ Form filling failed, discarding application");
+                        await discardApplication();
                         stillApplying = false;
-                        
-                        // Click cancel and discard buttons
-                        if (cancel) {
-                            cancel.click();
-                            await delay(1000);
-                        }
-                        if (discard) {
-                            discard.click();
-                            await delay(1000);
-                        }
-                        
                         break;
                     }
                 }
@@ -837,12 +890,8 @@ async function processApplicationSteps() {
                         consecutiveEmptySteps++;
                         
                         if (consecutiveEmptySteps >= 3) {
-                            console.log("❌ Too many consecutive steps without buttons, ending process");
-                            // Attempt to close any open dialogs before giving up
-                            const closeButtons = document.querySelectorAll('button[aria-label="Dismiss"], button.artdeco-modal__dismiss');
-                            if (closeButtons.length > 0) {
-                                closeButtons[0].click();
-                            }
+                            console.log("❌ Too many consecutive steps without buttons, discarding application");
+                            await discardApplication();
                             stillApplying = false;
                             break;
                         }
@@ -868,30 +917,20 @@ async function processApplicationSteps() {
                 console.log(`❌ Error in application step ${stepCounter}:`, stepError);
                 stepCounter++;
                 
-                // Try to continue despite errors
+               // For too many steps with errors:
                 if (stepCounter > 8) {
-                    console.log("❌ Too many steps with errors, ending process");
-                    
-                    // Try to close any open dialogs before giving up
-                    try {
-                        const closeButtons = document.querySelectorAll('button[aria-label="Dismiss"], button.artdeco-modal__dismiss');
-                        if (closeButtons.length > 0) {
-                            closeButtons[0].click();
-                        }
-                    } catch (e) { /* ignore */ }
-                    
+                    console.log("❌ Too many steps with errors, discarding application");
+                    await discardApplication();
                     stillApplying = false;
+                    break;
                 }
             }
         }
         
         // If we exited the loop because we hit max steps, try to close any open dialogs
         if (stepCounter > maxSteps) {
-            console.log("⚠️ Reached maximum steps without completing application");
-            const closeButtons = document.querySelectorAll('button[aria-label="Dismiss"], button.artdeco-modal__dismiss');
-            if (closeButtons.length > 0) {
-                closeButtons[0].click();
-            }
+            console.log("⚠️ Reached maximum steps without completing application, discarding");
+            await discardApplication();
         }
         
         console.log("✅ Application process completed");
