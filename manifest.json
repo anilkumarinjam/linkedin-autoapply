@@ -17,12 +17,13 @@
     },
     "web_accessible_resources": [
         {
-            "resources": ["supabase.js", "config.js", "popup.js","icons/ai_auto.png","icons/running.gif"],
+            "resources": ["supabase.js", "config.js", "popup.js","background.js","icons/ai_auto.png","icons/running.gif"],
             "matches": ["<all_urls>"]
         }
     ],
     "background": {
-        "service_worker": "background.js"
+        "service_worker": "background.js",
+        "type": "module"
     },
     "action": {
         "default_popup": "popup.html",

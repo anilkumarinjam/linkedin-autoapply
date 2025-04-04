@@ -21,7 +21,25 @@ function checkIfShouldStop() {
         throw new Error("AUTOMATION_STOPPED");
     }
 }
-
+async function handleStop() {
+    console.log("⏹️ Stopping automation");
+    isRunning = false;
+    stillApplying = false;
+    updateFabUI();
+    
+    if (jobTracker) {
+        // Sync stats before showing report
+        await jobTracker.syncStatsOnStop();
+        // Load latest stats
+        const savedStats = localStorage.getItem(jobTracker.sessionKey);
+        if (savedStats) {
+            jobTracker.sessionStats = JSON.parse(savedStats);
+        }
+        jobTracker.showReport();
+    }
+    
+    chrome.runtime.sendMessage({ action: "updateState", isRunning: false });
+}
 async function getUserSettings() {
     return new Promise((resolve) => {
         try {
@@ -256,8 +274,8 @@ window.addEventListener("load", () => {
             }
     
             const currentUrl = window.location.href;
-            if (!currentUrl.includes("/jobs/search/")) {
-                console.log("📍 Not on jobs page, setting redirect flag and navigating...");
+            if (!currentUrl.includes("/jobs/search/") && !currentUrl.includes("/jobs/collections/")) {
+                console.log("📍 Not on jobs page or collections page, setting redirect flag and navigating...");
                 localStorage.setItem("shouldStartAfterRedirect", "true");
                 window.location.href = linkedInJobsUrl;
             } else {
@@ -265,27 +283,19 @@ window.addEventListener("load", () => {
                     console.log("🚀 Starting automation from FAB");
                     isRunning = true;
                     updateFabUI();
-                    if(jobTracker) jobTracker.resetSessionStats();
+    
+                    // Initialize JobTracker only once at the start of session
+                    if (!jobTracker) {
+                        console.log("📊 Initializing new JobTracker session");
+                        jobTracker = new JobTracker();
+                        jobTracker.resetSessionStats(); // Reset session stats
+                        await jobTracker.initialize(); // Fetch daily stats from DB once
+                    }
+    
                     chrome.runtime.sendMessage({ action: "updateState", isRunning: true });
                     startAutomation();
                 } else {
-                    console.log("⏹️ Stopping automation from FAB");
-                    isRunning = false;
-                    stillApplying = false;
-                    updateFabUI();
-                    if (jobTracker) {// Show the report when stopping
-                        jobTracker.showReport();
-                    }
-                    try {
-                        const closeButtons = document.querySelectorAll('button[aria-label="Dismiss"], button.artdeco-modal__dismiss');
-                        if (closeButtons.length > 0) {
-                            closeButtons[0].click();
-                        }
-                    } catch (e) {
-                        // silently ignore
-                    }
-    
-                    chrome.runtime.sendMessage({ action: "updateState", isRunning: false });
+                    await handleStop();
                 }
             }
         } catch (error) {
@@ -348,30 +358,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log("Message received in content script:", message);
     
     if (message.action === "start") {
-        console.log("🚀 Starting LinkedIn automation");
+        console.log(`🚀 Starting LinkedIn automation from ${message.source || 'FAB'}`);
         isRunning = true;
         extensionIconClicked = true;
         updateFabUI();
         showNotification("Starting automation...", "success");
-        startAutomation().catch(error => {
-            console.error("Error in automation:", error);
-            showNotification("Automation error: " + error.message, "error");
-        });
+        
+        // Initialize JobTracker if not already initialized
+        if (!jobTracker) {
+            console.log("📊 Initializing new JobTracker session");
+            jobTracker = new JobTracker();
+            jobTracker.resetSessionStats();
+            jobTracker.initialize().then(() => {
+                startAutomation().catch(error => {
+                    console.error("Error in automation:", error);
+                    showNotification("Automation error: " + error.message, "error");
+                });
+            }).catch(error => {
+                console.error("Error initializing JobTracker:", error);
+                showNotification("Failed to initialize automation: " + error.message, "error");
+            });
+        } else {
+            startAutomation().catch(error => {
+                console.error("Error in automation:", error);
+                showNotification("Automation error: " + error.message, "error");
+            });
+        }
         sendResponse({ status: "Automation started" });
-    }else if (message.action === "stop") {
-        console.log("⏹️ Stopping LinkedIn automation");
-        isRunning = false;
-        extensionIconClicked = false;
-        stillApplying = false;
-        updateFabUI();
-        showNotification("Automation stopped", "warning");
-        sendResponse({ status: "Automation stopped" });
+    } else if (message.action === "stop") {
+        handleStop().then(() => {
+            sendResponse({ status: "Automation stopped" });
+        });
+        return true;
     } else if (message.action === "status") {
         sendResponse({ isRunning });
     } else if (message.action === "showNotification") {
         showNotification(message.text, message.type);
         sendResponse({ status: "Notification shown" });
-    }else if (message.action === "generateReport") {
+    } else if (message.action === "generateReport") {
         if (jobTracker) {
             jobTracker.showReport();
         }
@@ -390,12 +414,13 @@ function resetApplicationState() {
 // Update startAutomation to reset state before processing
 async function startAutomation() {
     try {
-        // Initialize job tracker
-        jobTracker = new JobTracker();
-        await jobTracker.initialize();
-        
+        // Only check if JobTracker exists
+        if (!jobTracker) {
+            throw new Error("JobTracker not initialized");
+        }
+
         resetApplicationState();
-        checkIfShouldStop();        
+        checkIfShouldStop();       
         // Look for job cards with fh-webext-job-display attribute
         const jobCards = document.querySelectorAll('li[fh-webext-job-display]');
         checkIfShouldStop(); // Check if automation should stop after job cards are found
@@ -471,7 +496,7 @@ async function startAutomation() {
             stillApplying = false;
             updateFabUI();
             chrome.runtime.sendMessage({ action: "updateState", isRunning: false });
-            showNotification("Daily application limit reached (50 applications). Try again tomorrow!", "warning");
+            showNotification("Daily application limit reached. Try again tomorrow!", "warning");
             jobTracker.showReport();
             return;
         }
@@ -989,37 +1014,55 @@ async function processApplicationSteps() {
 // Add to content.js
 class JobTracker {
     constructor() {
-        // Initialize session stats from localStorage or create new
-        const sessionKey = 'linkedinAutoApply_currentSession';
-        const storedSession = localStorage.getItem(sessionKey);
+        this.sessionKey = 'linkedinAutoApply_currentSession';
+        this.dailyKey = `linkedinAutoApply_${new Date().toISOString().split('T')[0]}`;
         
-        this.sessionStats = storedSession ? JSON.parse(storedSession) : {
+        // Try to load existing daily stats first
+        const existingDailyStats = localStorage.getItem(this.dailyKey);
+        if (existingDailyStats) {
+            console.log("📊 Loading existing daily stats:", JSON.parse(existingDailyStats));
+        }
+        
+        // Initialize session stats
+        const savedStats = localStorage.getItem(this.sessionKey);
+        this.sessionStats = savedStats ? JSON.parse(savedStats) : {
             totalAttempted: 0,
             successfullyApplied: 0,
             failed: 0,
             skipped: 0
         };
         
-        this.dailyLimit = 100;
-        this.sessionKey = sessionKey;
+        this.dailyLimit = 100; // Default, will be updated from DB
     }
 
     async initialize() {
-        // Existing daily stats initialization code...
-        const today = new Date().toISOString().split('T')[0];
-        const storedStats = localStorage.getItem(`linkedinAutoApply_${today}`);
-        
-        if (storedStats) {
-            const stats = JSON.parse(storedStats);
-            if (stats.appliedCount >= this.dailyLimit) {
-                console.log("🚫 Daily limit reached:", stats.appliedCount);
+        try {
+            // Always fetch latest settings from DB
+            const settings = await getUserSettings();
+            if (!settings) throw new Error("No user settings found");
+    
+            // Update daily limit from DB
+            this.dailyLimit = settings.daily_limit || 100;
+            
+            // Initialize daily stats from DB count
+            const dailyStats = {
+                appliedCount: settings.daily_count || 0,
+                lastUpdated: new Date().toISOString()
+            };
+            
+            // Always update localStorage with DB values
+            localStorage.setItem(this.dailyKey, JSON.stringify(dailyStats));
+            console.log("✅ Initialized daily stats from DB:", dailyStats);
+    
+            // Check if limit already reached
+            if (dailyStats.appliedCount >= this.dailyLimit) {
+                console.log("🚫 Daily limit reached:", dailyStats.appliedCount);
                 throw new Error("Daily application limit reached");
             }
-        } else {
-            localStorage.setItem(`linkedinAutoApply_${today}`, JSON.stringify({
-                appliedCount: 0,
-                lastUpdated: new Date().toISOString()
-            }));
+    
+        } catch (error) {
+            console.error("Error initializing JobTracker:", error);
+            throw error;
         }
     }
 
@@ -1027,10 +1070,26 @@ class JobTracker {
         try {
             // Update session stats
             this.sessionStats.totalAttempted++;
+            
+            // Get current daily stats
+            const dailyStats = JSON.parse(localStorage.getItem(this.dailyKey)) || {
+                appliedCount: 0,
+                lastUpdated: new Date().toISOString()
+            };
+    
             switch (status) {
                 case 'success':
                     this.sessionStats.successfullyApplied++;
-                    await this.incrementDailyCount();
+                    // Update daily count
+                    dailyStats.appliedCount++;
+                    dailyStats.lastUpdated = new Date().toISOString();
+                    
+                    // Save updated daily stats
+                    localStorage.setItem(this.dailyKey, JSON.stringify(dailyStats));
+                    
+                    if (dailyStats.appliedCount >= this.dailyLimit) {
+                        throw new Error("Daily application limit reached");
+                    }
                     break;
                 case 'failed':
                     this.sessionStats.failed++;
@@ -1039,20 +1098,49 @@ class JobTracker {
                     this.sessionStats.skipped++;
                     break;
             }
-
-            // Save updated session stats to localStorage
+    
+            // Save session stats
             localStorage.setItem(this.sessionKey, JSON.stringify(this.sessionStats));
             console.log("📊 Updated session stats:", this.sessionStats);
-
+            console.log("📊 Updated daily stats:", dailyStats);
+    
         } catch (error) {
             console.error("Error incrementing job count:", error);
-            if (error.message === "Daily application limit reached") {
-                throw error;
+            throw error;
+        }
+    }
+    
+    async syncStatsOnStop() {
+        try {
+            if (this.sessionStats.successfullyApplied > 0) {
+                console.log("🔄 Syncing stats with DB");
+                
+                let retries = 3;
+                while (retries > 0) {
+                    try {
+                        const response = await chrome.runtime.sendMessage({ 
+                            action: "updateDailyCount"
+                        });
+                        
+                        if (response?.success) {
+                            console.log("✅ Successfully synced final stats to DB");
+                            break;
+                        }
+                        retries--;
+                    } catch (error) {
+                        console.error("Error syncing with DB:", error);
+                        retries--;
+                        if (retries > 0) await delay(1000);
+                    }
+                }
+            } else {
+                console.log("ℹ️ No successful applications to sync");
             }
+        } catch (error) {
+            console.error("Error in syncStatsOnStop:", error);
         }
     }
 
-    // Add method to reset session stats
     resetSessionStats() {
         this.sessionStats = {
             totalAttempted: 0,
@@ -1063,42 +1151,14 @@ class JobTracker {
         localStorage.setItem(this.sessionKey, JSON.stringify(this.sessionStats));
     }
 
-    async incrementDailyCount() {
-        const today = new Date().toISOString().split('T')[0];
-        const storedStats = localStorage.getItem(`linkedinAutoApply_${today}`);
-        
-        if (storedStats) {
-            const stats = JSON.parse(storedStats);
-            stats.appliedCount++;
-            stats.lastUpdated = new Date().toISOString();
-            
-            // Check if we've hit the limit
-            if (stats.appliedCount >= this.dailyLimit) {
-                // Store the updated count before throwing the error
-                localStorage.setItem(`linkedinAutoApply_${today}`, JSON.stringify(stats));
-                // Notify background script about limit reached
-                chrome.runtime.sendMessage({ 
-                    action: "dailyLimitReached", 
-                    date: today,
-                    count: stats.appliedCount 
-                });
-                throw new Error("Daily application limit reached");
-            }
-            
-            localStorage.setItem(`linkedinAutoApply_${today}`, JSON.stringify(stats));
-        }
-    }
-
     generateReport() {
-        const today = new Date().toISOString().split('T')[0];
-        const storedStats = localStorage.getItem(`linkedinAutoApply_${today}`);
-        const dailyStats = storedStats ? JSON.parse(storedStats) : { appliedCount: 0 };
-
+        const dailyStats = JSON.parse(localStorage.getItem(this.dailyKey));
+        
         return {
             sessionStats: this.sessionStats,
             dailyStats: {
-                appliedToday: dailyStats.appliedCount,
-                remainingToday: Math.max(0, this.dailyLimit - dailyStats.appliedCount)
+                appliedToday: dailyStats?.appliedCount || 0,
+                remainingToday: Math.max(0, this.dailyLimit - (dailyStats?.appliedCount || 0))
             },
             dailyLimit: this.dailyLimit
         };
@@ -1169,6 +1229,6 @@ class JobTracker {
             </div>
         `;
     
-        showNotification(htmlContent, "info", 20000, true);
+        showNotification(htmlContent, "info", 10000, true);
     }
 }

@@ -151,6 +151,9 @@ async function loadUserSettings() {
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (!session) return;
 
+    // Store auth token for background script
+    chrome.storage.sync.set({ authToken: session.access_token });
+
     const { data, error } = await supabaseClient
         .from('user_settings')
         .select('*')
@@ -171,25 +174,39 @@ function showControls() {
 }
 
 // Function to start automation
-function startAutomation() {
-    chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-        const currentUrl = tabs[0].url;
-        const linkedInJobsUrl = "https://www.linkedin.com/jobs/search/?f_AL=true&f_E=2%2C3%2C4&f_TPR=r86400&geoId=103644278&keywords=java%20full%20stack%20developer&origin=JOB_SEARCH_PAGE_JOB_FILTER&refresh=true";
-        
-        if (!currentUrl.includes("/jobs/search/")) {
-            // Send message to background script to handle navigation and automation start
-            chrome.runtime.sendMessage({
-                action: "navigateAndStart",
-                url: linkedInJobsUrl
-            });
-            closePopupAndNotify("Redirecting to jobs page...", "info");
-        } else {
-            // If already on jobs page, start immediately
-            chrome.tabs.sendMessage(tabs[0].id, { action: "start" });
-            closePopupAndNotify("Starting automation...", "success");
+async function startAutomation() {
+    try {
+        // Check authentication first
+        const isAuthenticated = await checkAuthentication();
+        if (!isAuthenticated) {
+            console.log("🔒 User not authenticated");
+            showNotification("Please authenticate first", "warning");
+            return;
         }
-    });
+
+        chrome.tabs.query({ active: true, currentWindow: true }, async tabs => {
+            const currentUrl = tabs[0].url;
+            const linkedInJobsUrl = "https://www.linkedin.com/jobs/search/?f_AL=true&f_E=2%2C3%2C4&f_TPR=r86400&geoId=103644278&keywords=java%20full%20stack%20developer&origin=JOB_SEARCH_PAGE_JOB_FILTER&refresh=true";
+            
+            if (!currentUrl.includes("/jobs/search/")) {
+                console.log("📍 Not on jobs page, setting redirect flag and navigating...");
+                localStorage.setItem("shouldStartAfterRedirect", "true");
+                window.location.href = linkedInJobsUrl;
+            } else {
+                console.log("🚀 Starting automation from popup");
+                chrome.tabs.sendMessage(tabs[0].id, { 
+                    action: "start",
+                    source: "popup" // Add source to differentiate from FAB
+                });
+                closePopupAndNotify("Starting automation...", "success");
+            }
+        });
+    } catch (error) {
+        console.error("❌ Error in startAutomation:", error);
+        closePopupAndNotify("Failed to start automation: " + error.message, "error");
+    }
 }
+
 // Function to stop automation
 function stopAutomation() {
     chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
@@ -333,11 +350,12 @@ async function setupProfileManagement() {
     });
 
     // Handle sign out
+    // Also clear the token on sign out
     signOutBtn?.addEventListener('click', async () => {
         try {
             const { error } = await supabaseClient.auth.signOut();
             if (error) throw error;
-            chrome.storage.sync.remove('userSettings');
+            chrome.storage.sync.remove(['userSettings', 'authToken']); // Remove both
             document.getElementById('authContainer').style.display = 'block';
             document.getElementById('controls').style.display = 'none';
             closePopupAndNotify("Signed out successfully", "info");
