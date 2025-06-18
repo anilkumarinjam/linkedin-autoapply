@@ -1,5 +1,5 @@
 {
-    "manifest_version": 1,
+    "manifest_version": 3,
     "name": "LinkedIn Auto Apply",
     "version": "1.0",
     "description": "Automates LinkedIn Easy Apply",
