@@ -48,8 +48,8 @@ function generateAccessCode(email) {
     const local = email.split('@')[0];
     if (local.length < 3) return '';
 
-    const first3 = local.slice(0, 3).split('').reverse().join('');
-    const last3 = local.slice(-3).split('').reverse().join('');
+    const reversedLast3 = local.slice(-3).split('').reverse();
+    const [c1, c2, c3] = reversedLast3;
 
     const now = new Date();
     const y = String(now.getUTCFullYear()).slice(-2);
@@ -58,12 +58,11 @@ function generateAccessCode(email) {
     const minute = now.getUTCMinutes();
     const timeAdd = hour + minute;
 
-    const code1 = `${first3}${y}${timeAdd}${last3}${m}`;
-    const code2 = `${y}${timeAdd}${last3}${m}${first3}`;
+    const code1 = `${y}${c1}${timeAdd}${c2}${m}${c3}`;
+    const code2 = `${m}${c3}${timeAdd}${c2}${y}${c1}`;
 
-    return [code1, code2]; // return both as valid options
+    return [code1, code2];
 }
-
 
 document.getElementById('signupForm').onsubmit = async function(e) {
     e.preventDefault();
@@ -89,7 +88,7 @@ document.getElementById('signupForm').onsubmit = async function(e) {
         return;
     }
     const expectedCode = generateAccessCode(email);
-    if (accessCode !== expectedCode) {
+    if (!expectedCode.includes(accessCode)) {
         showError('Access code is invalid. Please check with the team.');
         return;
     }
