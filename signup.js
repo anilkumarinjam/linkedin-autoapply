@@ -10,21 +10,36 @@ function showError(msg) {
     err.textContent = msg;
     err.style.display = 'block';
     document.getElementById('signupSuccess').style.display = 'none';
+    // Hide modal if showing
+    const modal = document.getElementById('successModal');
+    if (modal) modal.remove();
 }
-function showSuccess(msg) {
-    const succ = document.getElementById('signupSuccess');
-    succ.textContent = msg;
-    succ.style.display = 'block';
-    document.getElementById('signupError').style.display = 'none';
+function showSuccessModal() {
+    // Remove any previous modal
+    const old = document.getElementById('successModal');
+    if (old) old.remove();
+    const modal = document.createElement('div');
+    modal.className = 'success-modal';
+    modal.id = 'successModal';
+    modal.innerHTML = `
+      <div class="success-modal-content">
+        <span class="success-check">
+          <svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#4caf50" opacity="0.15"/><circle cx="32" cy="32" r="28" fill="#4caf50" opacity="0.18"/><path d="M20 34l8 8 16-18" fill="none" stroke="#4caf50" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><animate attributeName="stroke-dasharray" from="0,40" to="40,0" dur="0.6s" fill="freeze"/></path></svg>
+        </span>
+        <div class="success-modal-message">Signup successful!</div>
+        <div class="success-modal-note">Extension Logged in! Close this page and use the pop up to start applying.</div>
+      </div>
+    `;
+    document.body.appendChild(modal);
 }
 
 function validateUrl(url, type) {
     if (!url) return false;
     if (type === 'linkedin') {
-        return /^https:\/\/(www\.)?linkedin\.com\/in\//i.test(url);
+        return /^https:\/\/(www\.)?linkedin\.com\/in\/[A-Za-z0-9\-_%]+\/?$/.test(url);
     }
     if (type === 'github') {
-        return /^https:\/\/(www\.)?github\.com\//i.test(url);
+        return /^https:\/\/(www\.)?github\.com\/[A-Za-z0-9\-_%]+\/?$/.test(url);
     }
     return false;
 }
@@ -56,16 +71,16 @@ document.getElementById('signupForm').onsubmit = async function(e) {
         return;
     }
     if (!validateUrl(linkedin, 'linkedin')) {
-        showError('Please enter a valid LinkedIn profile URL (e.g., https://www.linkedin.com/in/yourname)');
+        showError('LinkedIn URL must be in the format: https://www.linkedin.com/in/username');
         return;
     }
     if (!validateUrl(github, 'github')) {
-        showError('Please enter a valid GitHub profile URL (e.g., https://github.com/yourname)');
+        showError('GitHub URL must be in the format: https://github.com/username');
         return;
     }
     const expectedCode = generateAccessCode(email);
     if (accessCode !== expectedCode) {
-        showError('Access code is invalid. Please check the instructions.');
+        showError('Access code is invalid. Please check with the team.');
         return;
     }
     // Sign up with Supabase
@@ -91,7 +106,7 @@ document.getElementById('signupForm').onsubmit = async function(e) {
                 github_url: github
             }]);
         if (settingsError) throw settingsError;
-        showSuccess('Signup successful! Please login from the popup and close this page.');
+        showSuccessModal();
         document.getElementById('signupForm').reset();
     } catch (err) {
         showError(err.message || 'Signup failed.');
