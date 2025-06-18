@@ -19,12 +19,13 @@ function loadUserInfo() {
     userSettings = response?.userSettings || {};
     const infoDiv = document.getElementById('userInfo');
     infoDiv.innerHTML = `
-      <b>Name:</b> ${userSettings.name || 'N/A'}<br>
-      <b>Email:</b> ${userSettings.email || 'N/A'}<br>
-      <b>Phone:</b> ${userSettings.phone_number || 'N/A'}<br>
-      <b>Experience:</b> ${userSettings.default_answer || 'N/A'} Yrs <br>
-      <span style='color:#888;font-size:12px;'>(Basic info is fixed after signup)</span>
-    `;
+    <span><b>Name:</b> ${userSettings.name || 'N/A'}</span>&nbsp;&nbsp;
+    <span><b>Email:</b> ${userSettings.email || 'N/A'}</span>&nbsp;&nbsp;
+    <span><b>Phone:</b> ${userSettings.phone_number || 'N/A'}</span>&nbsp;&nbsp;
+    <span><b>Experience:</b> ${userSettings.default_answer || 'N/A'} Yrs</span><br>
+    <span style='color:#888;font-size:12px;'>(Basic info is fixed after signup)</span>
+  `;
+  
   });
 }
 
