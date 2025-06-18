@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Up - LinkedIn Auto Apply</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        body {
+            min-height: 100vh;
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e9f2 100%);
+            margin: 0;
+            padding: 0;
+            /* Remove popup-specific styles for full page */
+            border-radius: 0;
+            box-shadow: none;
+            overflow-x: hidden;
+        }
+
+        .signup-container {
+            max-width: 400px;
+            width: 100%;
+            margin: 40px auto;
+            background: #fff;
+            border-radius: 18px;
+            box-shadow: 0 4px 24px rgba(10,102,194,0.10);
+            padding: 32px 24px 24px 24px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .signup-title {
+            font-size: 1.7rem;
+            font-weight: 700;
+            color: #0a66c2;
+            margin-bottom: 18px;
+            background: linear-gradient(90deg,#0a66c2,#6a11cb);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            letter-spacing: 1px;
+        }
+
+        .success-message {
+            color: #0a66c2;
+            background: #e3f2fd;
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 18px;
+            font-weight: 600;
+        }
+
+        .error-message {
+            color: #e53935;
+            background: #ffebee;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+            font-weight: 500;
+        }
+
+        .input-group {
+            display: flex;
+            align-items: center;
+            background: #f7f7fa;
+            border-radius: 25px;
+            margin: 10px 0;
+            box-shadow: 0 1px 4px #0a66c211;
+            border: 1.5px solid #e3eafc;
+            transition: border 0.3s, box-shadow 0.3s;
+        }
+
+        .input-group:focus-within {
+            border: 1.5px solid #0a66c2;
+            box-shadow: 0 2px 8px #0a66c222;
+        }
+
+        .input-icon {
+            font-size: 1.2em;
+            margin-left: 14px;
+            margin-right: 8px;
+            color: #0a66c2;
+            opacity: 0.7;
+        }
+
+        .input-group input {
+            border: none;
+            background: transparent;
+            outline: none;
+            padding: 12px 10px 12px 0;
+            font-size: 1em;
+            width: 100%;
+            border-radius: 25px;
+        }
+
+        .input-group input:focus {
+            background: #e3eafc;
+        }
+
+        .auth-btn {
+            background: linear-gradient(90deg,#0a66c2 60%,#6a11cb 100%);
+            color: #fff;
+            border: none;
+            border-radius: 25px;
+            padding: 12px 0;
+            font-weight: 700;
+            font-size: 1.08rem;
+            cursor: pointer;
+            box-shadow: 0 2px 8px #0a66c222;
+            transition: background 0.3s, box-shadow 0.3s, transform 0.15s;
+        }
+
+        .auth-btn:hover {
+            background: linear-gradient(90deg,#6a11cb 60%,#0a66c2 100%);
+            box-shadow: 0 4px 16px #0a66c244;
+            transform: scale(1.04);
+        }
+
+        .auth-btn:active {
+            transform: scale(0.98);
+        }
+
+        /* Center all direct children of body */
+        body > * {
+            margin-left: auto;
+            margin-right: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="signup-container">
+        <img src="icons/icon.png" alt="Logo" style="width:56px;height:56px;margin-bottom:10px;box-shadow:0 2px 12px #0a66c233;border-radius:12px;">
+        <div class="signup-title">Sign Up</div>
+        <form id="signupForm" style="width:100%;max-width:340px;">
+            <div class="input-group"><span class="input-icon">👤</span><input type="text" id="name" placeholder="Full Name" required></div>
+            <div class="input-group"><span class="input-icon">📧</span><input type="email" id="email" placeholder="Email" required></div>
+            <div class="input-group"><span class="input-icon">🔒</span><input type="password" id="password" placeholder="Password" required></div>
+            <div class="input-group"><span class="input-icon">📱</span><input type="tel" id="phoneNumber" placeholder="Phone Number" required></div>
+            <div class="input-group"><span class="input-icon">💼</span><input type="text" id="defaultAnswer" placeholder="Years of Experience" required></div>
+            <div class="input-group"><span class="input-icon">🔗</span><input type="url" id="linkedinUrl" placeholder="LinkedIn Profile URL" required pattern="https://.*linkedin.com/in/.*"></div>
+            <div class="input-group"><span class="input-icon">🐙</span><input type="url" id="githubUrl" placeholder="GitHub Profile URL" required pattern="https://.*github.com/.*"></div>
+            <div class="input-group"><span class="input-icon">🔑</span><input type="text" id="accessCode" placeholder="Access Code" required maxlength="20"></div>
+            <button type="submit" class="auth-btn" style="margin-top:10px;">Sign Up</button>
+        </form>
+        <div id="signupError" class="error-message" style="display:none;"></div>
+        <div id="signupSuccess" class="success-message" style="display:none;"></div>
+        <div style="margin-top:18px;font-size:13px;color:#888;">Already have an account? <b>Login from the popup</b></div>
+    </div>
+    <script src="supabase.js"></script>
+    <script src="config.js"></script>
+    <script src="signup.js"></script>
+</body>
+</html>

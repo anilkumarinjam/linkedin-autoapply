@@ -53,8 +53,8 @@ function setupFormListeners() {
     // Form switching
     document.getElementById("showSignup")?.addEventListener("click", (e) => {
         e.preventDefault();
-        document.getElementById("loginForm").style.display = "none";
-        document.getElementById("signupForm").style.display = "block";
+        // Redirect to extension signup page
+        window.open(chrome.runtime.getURL("signup.html"), "_blank");
     });
 
     document.getElementById("showLogin")?.addEventListener("click", (e) => {
