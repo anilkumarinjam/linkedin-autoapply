@@ -655,10 +655,9 @@ async function fillApplicationForm() {
     }
     
     try {
-        // Handle text fields - restrict to modal
-        const textInputs = modalContainer.querySelectorAll('input[type="text"]:not([value]), input[type="tel"]:not([value]), input[type="email"]:not([value])');
+        // Handle text fields - process all, even if already filled
+        const textInputs = modalContainer.querySelectorAll('input[type="text"], input[type="tel"], input[type="email"]');
         for (const input of textInputs) {
-            if (input.value.trim()) continue;
             let question = '';
             if (input.labels && input.labels[0]) question = input.labels[0].innerText.trim();
             else if (input.placeholder) question = input.placeholder.trim();
@@ -673,14 +672,18 @@ async function fillApplicationForm() {
                 const isPhoneField = input.id?.toLowerCase().includes('phone') || input.name?.toLowerCase().includes('phone') || input.placeholder?.toLowerCase().includes('phone');
                 answer = isPhoneField ? userSettings.phone_number : userSettings.default_answer;
             }
-            // Auto-add if missing, with answer used
+            // Always add Q/A, even if already filled
             await addQAPairIfMissing(question, 'blank', answer || input.value || '');
-            input.value = answer;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
+            if (question) {
+                input.value = answer;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            } else {
+                console.log('⚠️ Could not extract question text for input', input);
+            }
             await delay(300);
         }
-        // Handle dropdowns - restrict to modal
-        const selects = modalContainer.querySelectorAll('select:not([value])');
+        // Handle dropdowns - process all
+        const selects = modalContainer.querySelectorAll('select');
         for (const select of selects) {
             if (select.options.length > 1) {
                 let question = '';
@@ -702,54 +705,53 @@ async function fillApplicationForm() {
                     select.value = select.options[1].value;
                     answer = select.options[1].text.trim();
                 }
-                // Auto-add if missing, with answer used and options
                 await addQAPairIfMissing(question, 'choice', answer, options);
+                if (!question) {
+                    console.log('⚠️ Could not extract question text for select', select);
+                }
                 select.dispatchEvent(new Event('change', { bubbles: true }));
                 await delay(300);
             }
         }
-        // Handle radio buttons - restrict to modal
+        // Handle radio buttons - process all
         const radioGroups = modalContainer.querySelectorAll('fieldset');
         for (const group of radioGroups) {
             const radios = group.querySelectorAll('input[type="radio"]');
-            if (radios.length > 0 && !Array.from(radios).some(r => r.checked)) {
-                // Only use legend as question, fallback to first label for first radio
+            if (radios.length > 0) {
                 let question = group.querySelector('legend')?.innerText.trim();
                 if (!question && radios[0]) {
                     const label = group.querySelector(`label[for='${radios[0].id}']`);
                     if (label) question = label.innerText.trim();
                 }
                 question = cleanQuestionText(question);
-                let answer = null;
-                if (question) {
-                    answer = qaPairs.find(q => cleanQuestionText(q.question) === question && q.type === 'radio');
-                    answer = answer ? answer.answer : null;
-                }
                 // Extract all options for storage
                 const options = Array.from(radios).map(r => {
                     const label = group.querySelector(`label[for='${r.id}']`);
                     return label ? label.innerText.trim() : r.value;
                 }).filter(Boolean);
-                let radioToSelect = null;
-                if (answer) {
-                    radioToSelect = Array.from(radios).find(r => r.value === answer || r.id === answer);
+                // Find the checked radio, or use stored/default
+                let checkedRadio = Array.from(radios).find(r => r.checked);
+                let answer = checkedRadio ? checkedRadio.value : null;
+                if (!answer && question) {
+                    let stored = qaPairs.find(q => cleanQuestionText(q.question) === question && q.type === 'radio');
+                    answer = stored ? stored.answer : (options[0] || '');
                 }
-                if (!radioToSelect) {
-                    radioToSelect = Array.from(radios).find(r => r.value.toLowerCase() === 'yes') || radios[0];
+                // If nothing is checked, select the answer
+                if (!checkedRadio && answer) {
+                    let toSelect = Array.from(radios).find(r => r.value === answer);
+                    if (toSelect) toSelect.click();
                 }
-                if (radioToSelect) {
-                    radioToSelect.click();
-                    answer = radioToSelect.value;
-                }
-                // Auto-add if missing, with answer used and options
                 await addQAPairIfMissing(question, 'radio', answer, options);
+                if (!question) {
+                    console.log('⚠️ Could not extract question text for radio group', group);
+                }
                 await delay(300);
             }
         }
-        // Handle checkboxes - restrict to modal
-        const checkboxes = modalContainer.querySelectorAll('input[type="checkbox"]:not(:checked)');
+        // Handle checkboxes - process all
+        const checkboxes = modalContainer.querySelectorAll('input[type="checkbox"]');
         for (const checkbox of checkboxes) {
-            if (checkbox.checked || checkbox.name === "jobDetailsEasyApplyTopChoiceCheckbox") continue;
+            if (checkbox.name === "jobDetailsEasyApplyTopChoiceCheckbox") continue;
             let question = '';
             if (checkbox.labels && checkbox.labels[0]) question = checkbox.labels[0].innerText.trim();
             else if (checkbox.getAttribute('aria-label')) question = checkbox.getAttribute('aria-label').trim();
@@ -762,8 +764,10 @@ async function fillApplicationForm() {
             if (answer && (answer === 'true' || answer === 'checked')) {
                 checkbox.click();
             }
-            // Auto-add if missing, with answer used (true/false)
             await addQAPairIfMissing(question, 'bool', answer || (checkbox.checked ? 'true' : 'false'));
+            if (!question) {
+                console.log('⚠️ Could not extract question text for checkbox', checkbox);
+            }
             await delay(300);
         }
         console.log("✅ Form fields filled");
@@ -805,15 +809,10 @@ async function processApplicationSteps() {
     try {
         while (stillApplying && stepCounter <= maxSteps) {
             checkIfShouldStop(); // Check if automation should stop before each step
-            
             console.log(`Step ${stepCounter}: Looking for action buttons...`);
-            
-            // Wait for any dialog content to load
             await delay(1000);
-            
             try {
                 checkIfShouldStop(); // Check if automation should stop inside try block
-                
                 // Check for success message or completion indicators
                 const successIndicators = [
                     "application submitted",
@@ -821,15 +820,12 @@ async function processApplicationSteps() {
                     "your application was sent",
                     "we've received your application"
                 ];
-                
                 const dialogText = document.querySelector('.artdeco-modal__content')?.textContent.toLowerCase() || '';
                 const isCompleted = successIndicators.some(text => dialogText.includes(text));
-                
                 if (isCompleted) {
                     console.log("🎉 Application completion message detected!");
                     await jobTracker.incrementJobCount('success');
                     stillApplying = false;
-                    
                     // Try to close any remaining dialogs
                     try {
                         const closeButtons = document.querySelectorAll('button[aria-label="Dismiss"], button.artdeco-modal__dismiss, button[data-control-name="cancel_application_confirm_btn"]');
@@ -841,64 +837,32 @@ async function processApplicationSteps() {
                     } catch (e) {
                         console.log("Error closing success dialog:", e);
                     }
-                    
                     console.log("✅ Application process completed");
                     break;
                 }
-                
+                // Always fill form on every step
+                const formFilled = await fillApplicationForm();
+                checkIfShouldStop(); // Check if automation should stop after form filling
+                if (!formFilled) {
+                    console.log("❌ Form filling failed, discarding application");
+                    await discardApplication();
+                    await jobTracker.incrementJobCount('failed');
+                    stillApplying = false;
+                    break;
+                }
                 // Look for action buttons with valid selectors
                 const submitButton = document.querySelector('button[aria-label="Submit application"], button[data-control-name="submit_application"], button[data-control-name="submit_resume"]');
                 const doneButton = document.querySelector('button[class="artdeco-button artdeco-button--2 artdeco-button--primary ember-view mlA block"]');
                 const reviewButton = document.querySelector('button[aria-label="Review your application"], button[data-control-name="review_application"]');
                 const nextButton = document.querySelector('button[aria-label="Continue to next step"], button[data-control-name="continue_unify"], button.artdeco-button--primary');
-                const cancel = document.querySelector('button[aria-label="Dismiss"]');
-                const discard = document.querySelector('button[data-control-name="discard_application_confirm_btn"]');
-                
-                // Check if this is the first step with a "Review" or similar button
-                const isFirstStep = stepCounter === 1;
-                if (isFirstStep) {
-                    console.log("⏭️ First step - skipping form fill, looking for Next button");
-                    
-                    // In first step, prioritize finding any primary button
-                    const primaryButtons = Array.from(document.querySelectorAll('button.artdeco-button--primary'));
-                    const nextOrSubmitBtn = primaryButtons.find(btn => {
-                        const text = btn.textContent.trim().toLowerCase();
-                        return text.includes('next') || text.includes('submit') || text.includes('apply') || text.includes('continue');
-                    });
-                    
-                    if (nextOrSubmitBtn) {
-                        console.log(`Found primary button with text: "${nextOrSubmitBtn.textContent.trim()}"`);
-                        nextOrSubmitBtn.click();
-                        await delay(1500);
-                        stepCounter++;
-                        continue;
-                    }
-                }
-                
-                // Check if form filling is needed
-                const needsFormFilling = true; // Placeholder, replace with actual logic
-                if (needsFormFilling) {
-                    const formFilled = await fillApplicationForm();
-                    checkIfShouldStop(); // Check if automation should stop after form filling
-                    
-                    if (!formFilled) {
-                        console.log("❌ Form filling failed, discarding application");
-                        await discardApplication();
-                        await jobTracker.incrementJobCount('failed');
-                        stillApplying = false;
-                        break;
-                    }
-                }
-                
-                // Add checks before button clicks
+                // Add: after navigation, fill form again to catch new fields
+                let navigated = false;
                 if (submitButton) {
-                    checkIfShouldStop(); // Check if automation should stop before clicking the submit button
+                    checkIfShouldStop();
                     console.log("✅ Found Submit button, clicking...");
                     submitButton.click();
                     stillApplying = false;
                     await delay(2000);
-                    
-                    // Close any success dialogs
                     try {
                         const closeButtons = document.querySelectorAll('button[aria-label="Dismiss"], button.artdeco-modal__dismiss');
                         if (closeButtons.length > 0) {
@@ -907,13 +871,10 @@ async function processApplicationSteps() {
                     } catch (e) {
                         console.log("Error closing dialog:", e);
                     }
-                    
                     console.log("✅ Application process completed");
                     await jobTracker.incrementJobCount('success');
                     break;
                 }
-                
-                // Handle other buttons
                 if (doneButton) {
                     console.log("✅ Found Done button, clicking...");
                     doneButton.click();
@@ -922,35 +883,37 @@ async function processApplicationSteps() {
                     console.log("✅ Application process completed");
                     await jobTracker.incrementJobCount('success');
                     break;
-                }
-                else if (reviewButton) {
+                } else if (reviewButton) {
                     console.log("✅ Found Review button, clicking...");
                     reviewButton.click();
-                    await delay(1500); // Wait for the review page to load
-                }
-                else if (nextButton) {
+                    navigated = true;
+                    await delay(1500);
+                } else if (nextButton) {
                     console.log("✅ Found Next button, clicking...");
                     nextButton.click();
+                    navigated = true;
                     await delay(1500);
                 }
-                
+                // After navigation, fill form again to catch new fields
+                if (navigated) {
+                    await fillApplicationForm();
+                }
                 // Last resort: look for any button with next/continue/submit in the text
                 if (!submitButton && !doneButton && !reviewButton && !nextButton) {
                     console.log("⚠️ No standard buttons found, looking for buttons by text content");
-                    
                     const actionButtonTexts = ["next", "continue", "review", "submit"];
                     const actionButton = Array.from(document.querySelectorAll('button')).find(btn => {
                         const text = btn.textContent.trim().toLowerCase();
                         return actionButtonTexts.some(actionText => text.includes(actionText));
                     });
-                    
                     if (actionButton) {
                         console.log(`✅ Found button with action text: "${actionButton.textContent.trim()}", clicking...`);
                         actionButton.click();
+                        await delay(1500);
+                        await fillApplicationForm();
                     } else {
                         console.log("⚠️ No action buttons found by text in this step");
                         consecutiveEmptySteps++;
-                        
                         if (consecutiveEmptySteps >= 3) {
                             console.log("❌ Too many consecutive steps without buttons, discarding application");
                             await discardApplication();
@@ -962,10 +925,8 @@ async function processApplicationSteps() {
                 } else {
                     consecutiveEmptySteps = 0; // Reset counter when we successfully find a button
                 }
-                
                 stepCounter++;
                 await delay(1500);
-                
             } catch (stepError) {
                 if (stepError.message === "AUTOMATION_STOPPED") {
                     // Clean up any open dialogs
@@ -979,8 +940,6 @@ async function processApplicationSteps() {
                 }
                 console.log(`❌ Error in application step ${stepCounter}:`, stepError);
                 stepCounter++;
-                
-               // For too many steps with errors:
                 if (stepCounter > 8) {
                     console.log("❌ Too many steps with errors, discarding application");
                     await discardApplication();
@@ -990,17 +949,12 @@ async function processApplicationSteps() {
                 }
             }
         }
-        
         // If we exited the loop because we hit max steps, try to close any open dialogs
         if (stepCounter > maxSteps) {
             console.log("⚠️ Reached maximum steps without completing application, discarding");
             await jobTracker.incrementJobCount('failed');
             await discardApplication();
         }
-        
-        // console.log("✅ Application process completed");
-        // await jobTracker.incrementJobCount('success');
-        
     } catch (processError) {
         if (processError.message === "AUTOMATION_STOPPED") {
             return;
@@ -1043,29 +997,23 @@ class JobTracker {
 
     async initialize() {
         try {
-            // Always fetch latest settings from DB
+            // Only use localStorage for daily stats
             const settings = await getUserSettings();
             if (!settings) throw new Error("No user settings found");
-    
-            // Update daily limit from DB
             this.dailyLimit = settings.daily_limit || 100;
-            
-            // Initialize daily stats from DB count
-            const dailyStats = {
-                appliedCount: settings.daily_count || 0,
-                lastUpdated: new Date().toISOString()
-            };
-            
-            // Always update localStorage with DB values
-            localStorage.setItem(this.dailyKey, JSON.stringify(dailyStats));
-            console.log("✅ Initialized daily stats from DB:", dailyStats);
-    
+            // Try to load existing daily stats
+            let dailyStats = JSON.parse(localStorage.getItem(this.dailyKey));
+            if (!dailyStats) {
+                dailyStats = {
+                    appliedCount: 0,
+                    lastUpdated: new Date().toISOString()
+                };
+                localStorage.setItem(this.dailyKey, JSON.stringify(dailyStats));
+            }
             // Check if limit already reached
             if (dailyStats.appliedCount >= this.dailyLimit) {
-                console.log("🚫 Daily limit reached:", dailyStats.appliedCount);
                 throw new Error("Daily application limit reached");
             }
-    
         } catch (error) {
             console.error("Error initializing JobTracker:", error);
             throw error;
@@ -1117,34 +1065,8 @@ class JobTracker {
     }
     
     async syncStatsOnStop() {
-        try {
-            if (this.sessionStats.successfullyApplied > 0) {
-                console.log("🔄 Syncing stats with DB");
-                
-                let retries = 3;
-                while (retries > 0) {
-                    try {
-                        const response = await chrome.runtime.sendMessage({ 
-                            action: "updateDailyCount"
-                        });
-                        
-                        if (response?.success) {
-                            console.log("✅ Successfully synced final stats to DB");
-                            break;
-                        }
-                        retries--;
-                    } catch (error) {
-                        console.error("Error syncing with DB:", error);
-                        retries--;
-                        if (retries > 0) await delay(1000);
-                    }
-                }
-            } else {
-                console.log("ℹ️ No successful applications to sync");
-            }
-        } catch (error) {
-            console.error("Error in syncStatsOnStop:", error);
-        }
+        // No longer syncs with Supabase, just logs
+        console.log("[JobTracker] syncStatsOnStop: local only, no remote sync");
     }
 
     resetSessionStats() {

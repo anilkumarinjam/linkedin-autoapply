@@ -37,6 +37,9 @@ document.addEventListener("DOMContentLoaded", async () => {
                 chrome.storage.sync.remove(['userSettings', 'authToken']);
                 document.getElementById('authContainer').style.display = 'block';
                 document.getElementById('controls').style.display = 'none';
+                // Hide welcome message on sign out
+                const welcomeDiv = document.getElementById("welcomeMessage");
+                if (welcomeDiv) welcomeDiv.style.display = "none";
                 closePopupAndNotify("Signed out successfully", "info");
             } catch (error) {
                 closePopupAndNotify("Failed to sign out: " + error.message, "error");
@@ -323,6 +326,16 @@ function showControls() {
     document.getElementById("linkedinFillBtn")?.removeAttribute("disabled");
     document.getElementById("githubFillBtn")?.removeAttribute("disabled");
     document.getElementById("openQAManagerBtn")?.removeAttribute("disabled");
+    // Show welcome message with user's name
+    getUserSettings().then(userSettings => {
+        const welcomeDiv = document.getElementById("welcomeMessage");
+        if (userSettings && userSettings.name) {
+            welcomeDiv.textContent = `Hi ${userSettings.name}, welcome!`;
+            welcomeDiv.style.display = "block";
+        } else {
+            welcomeDiv.style.display = "none";
+        }
+    });
 }
 
 // Function to start automation

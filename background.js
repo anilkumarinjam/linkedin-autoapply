@@ -40,41 +40,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
         return true;
     }
-    else if (message.action === "updateDailyCount") {
-        (async () => {
-            try {
-                // Get daily stats from the sender tab
-                const [{ result: dailyStats }] = await chrome.scripting.executeScript({
-                    target: { tabId: sender.tab.id },
-                    func: () => {
-                        const today = new Date().toISOString().split('T')[0];
-                        const key = `linkedinAutoApply_${today}`;
-                        const stats = localStorage.getItem(key);
-                        return stats ? JSON.parse(stats) : null;
-                    }
-                });
-
-                if (!dailyStats) {
-                    throw new Error("No daily stats found in localStorage");
-                }
-
-                debugLog('Retrieved daily stats from localStorage:', dailyStats);
-                console.log("Sending Daily Count to update", dailyStats.appliedCount);
-                const result = await updateUserDailyCount(
-                    dailyStats.appliedCount,
-                    new Date().toISOString().split('T')[0]
-                );
-
-                sendResponse({ success: true, data: result });
-            } catch (error) {
-                console.error("❌ Error updating daily count:", error);
-                sendResponse({ success: false, error: error.message });
-            }
-        })();
-        return true; // Keep message channel open
-    }
     // --- Q&A and User Settings Storage Messaging ---
-    // Q&A and user settings storage API
     if (message.action === "getQAPairs") {
         chrome.storage.sync.get(['qaPairs'], (result) => {
             sendResponse({ qaPairs: result.qaPairs || [] });
@@ -100,52 +66,3 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     }
 });
-
-async function updateUserDailyCount(count, date) {
-    try {
-        debugLog('Starting daily count update:', { count, date });
-        
-        // Get user settings from storage
-        const { userSettings } = await chrome.storage.sync.get(['userSettings']);
-        debugLog('Retrieved user settings:', userSettings);
-        
-        if (!userSettings?.user_id) {
-            throw new Error("No user settings found");
-        }
-
-        // Get auth token from storage
-        const { authToken } = await chrome.storage.sync.get(['authToken']);
-        if (!authToken) {
-            throw new Error("No auth token found");
-        }
-
-        // Set auth header for this request
-        supabaseClient.auth.setSession({
-            access_token: authToken,
-            refresh_token: null
-        });
-
-        debugLog('Attempting to update count:', count);
-
-        // Use upsert instead of update
-        const { error: updateError } = await supabaseClient
-            .from('user_settings')
-            .update({
-                daily_count: count,
-                last_apply_date: date,
-                updated_at: new Date().toISOString()
-            })
-            .eq('user_id', userSettings.user_id);
-
-        if (updateError) {
-            debugLog('Upsert error:', updateError);
-            throw updateError;
-        }
-
-        return { success: true };
-
-    } catch (error) {
-        console.error("❌ Error in updateUserDailyCount:", error);
-        throw error;
-    }
-}
