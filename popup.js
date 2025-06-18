@@ -329,9 +329,11 @@ function showControls() {
     // Show welcome message with user's name
     getUserSettings().then(userSettings => {
         const welcomeDiv = document.getElementById("welcomeMessage");
+        const betaDiv = document.getElementById("betaMessage");
         if (userSettings && userSettings.name) {
             welcomeDiv.textContent = `Hi ${userSettings.name}, welcome!`;
             welcomeDiv.style.display = "block";
+            betaDiv.style.display = "none"; // Show beta message
         } else {
             welcomeDiv.style.display = "none";
         }

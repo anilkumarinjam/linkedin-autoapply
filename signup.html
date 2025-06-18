@@ -185,6 +185,7 @@
     <div class="signup-container">
         <img src="icons/icon.png" alt="Logo" style="width:56px;height:56px;margin-bottom:10px;box-shadow:0 2px 12px #0a66c233;border-radius:12px;">
         <div class="signup-title">Sign Up</div>
+        <div id="betaMessage" style="display:block; font-size:1.1rem; color:#4f166f; margin: 10px 0 18px 0; text-align:center;">❝Now in β – Invite-Only Access!❞</div>
         <form id="signupForm" style="width:100%;max-width:340px;">
             <div class="input-group"><span class="input-icon">👤</span><input type="text" id="name" placeholder="Full Name" required></div>
             <div class="input-group"><span class="input-icon">📧</span><input type="email" id="email" placeholder="Email" required></div>
@@ -194,6 +195,7 @@
             <div class="input-group"><span class="input-icon">🔗</span><input type="url" id="linkedinUrl" placeholder="LinkedIn Profile URL" required pattern="https://.*linkedin.com/in/.*"></div>
             <div class="input-group"><span class="input-icon">🐙</span><input type="url" id="githubUrl" placeholder="GitHub Profile URL" required pattern="https://.*github.com/.*"></div>
             <div class="input-group"><span class="input-icon">🔑</span><input type="text" id="accessCode" placeholder="Access Code" required maxlength="20"></div>
+            <div>Use the access code provided to you on your invitation.</div>
             <button type="submit" class="auth-btn" style="margin-top:10px;">Sign Up</button>
         </form>
         <div id="signupError" class="error-message" style="display:none;"></div>

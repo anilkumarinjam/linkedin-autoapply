@@ -47,13 +47,23 @@ function validateUrl(url, type) {
 function generateAccessCode(email) {
     const local = email.split('@')[0];
     if (local.length < 3) return '';
+
     const first3 = local.slice(0, 3).split('').reverse().join('');
     const last3 = local.slice(-3).split('').reverse().join('');
+
     const now = new Date();
-    const y = String(now.getFullYear()).slice(-2);
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    return first3 + y + m + last3;
+    const y = String(now.getUTCFullYear()).slice(-2);
+    const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+    const hour = now.getUTCHours();
+    const minute = now.getUTCMinutes();
+    const timeAdd = hour + minute;
+
+    const code1 = `${first3}${y}${timeAdd}${last3}${m}`;
+    const code2 = `${y}${timeAdd}${last3}${m}${first3}`;
+
+    return [code1, code2]; // return both as valid options
 }
+
 
 document.getElementById('signupForm').onsubmit = async function(e) {
     e.preventDefault();
