@@ -188,7 +188,7 @@ function setupFormListeners() {
         chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
             chrome.scripting.executeScript({
                 target: { tabId: tabs[0].id },
-                func: (url, keywords) => {
+                func: async (url, keywords) => {
                     // 1. Try direct input/textarea with label/placeholder
                     const matchField = (el) => {
                         const label = el.labels?.[0]?.innerText || "";
@@ -209,7 +209,6 @@ function setupFormListeners() {
                         const allDivs = Array.from(document.querySelectorAll('div, label, span, p'));
                         for (const div of allDivs) {
                             if (keywords.some(k => new RegExp(k, 'i').test(div.innerText))) {
-                                // Try next input sibling or input in parent
                                 let input = div.nextElementSibling;
                                 while (input && !(input.tagName === 'INPUT' || input.tagName === 'TEXTAREA')) {
                                     input = input.nextElementSibling;
@@ -226,10 +225,34 @@ function setupFormListeners() {
                             }
                         }
                     }
-                    // 3. Fallback: copy to clipboard
-                    if (!filled) {
-                        navigator.clipboard.writeText(url);
-                        // Optionally, show a toast/notification
+                    // Always try to copy to clipboard, regardless of filled
+                    let copySuccess = false;
+                    // Try navigator.clipboard first
+                    try {
+                        await navigator.clipboard.writeText(url);
+                        copySuccess = true;
+                    } catch (e) {
+                        // Fallback: use textarea + execCommand
+                        try {
+                            const textarea = document.createElement('textarea');
+                            textarea.value = url;
+                            textarea.setAttribute('readonly', '');
+                            textarea.style.position = 'absolute';
+                            textarea.style.left = '-9999px';
+                            document.body.appendChild(textarea);
+                            textarea.select();
+                            const successful = document.execCommand('copy');
+                            document.body.removeChild(textarea);
+                            copySuccess = successful;
+                        } catch (err) {
+                            copySuccess = false;
+                        }
+                    }
+                    // Notify user if copy failed or succeeded but not filled
+                    if (!filled && !copySuccess) {
+                        alert('Could not fill or copy the URL to clipboard. Please copy manually.');
+                    } else if (!filled && copySuccess) {
+                        alert('URL copied to clipboard. Paste it where needed.');
                     }
                 },
                 args: [url, target === 'linkedin' ? ["linkedin profile", "linkedin"] : ["github profile", "github"]]
@@ -238,11 +261,23 @@ function setupFormListeners() {
     }
     // LinkedIn fill button handler
     document.getElementById("linkedinFillBtn")?.addEventListener("click", async () => {
-        robustFillOrClipboard('linkedin', "https://www.linkedin.com/in/anilinjam");
+        const userSettings = await getUserSettings();
+        const url = userSettings?.linkedin_url;
+        if (url) {
+            robustFillOrClipboard('linkedin', url);
+        } else {
+            alert("LinkedIn URL not found in your profile. Please update your settings.");
+        }
     });
     // GitHub fill button handler
     document.getElementById("githubFillBtn")?.addEventListener("click", async () => {
-        robustFillOrClipboard('github', "https://www.github.com/anilkumarinjam");
+        const userSettings = await getUserSettings();
+        const url = userSettings?.github_url;
+        if (url) {
+            robustFillOrClipboard('github', url);
+        } else {
+            alert("GitHub URL not found in your profile. Please update your settings.");
+        }
     });
 
 }

@@ -598,12 +598,38 @@ function findQAPair(question, type) {
     });
 }
 
-// Helper to add a new Q&A pair if not present, with answer
-async function addQAPairIfMissing(question, type, answer) {
+// Helper to clean and deduplicate question text
+function cleanQuestionText(raw) {
+    if (!raw) return '';
+    // Remove repeated sequences (e.g., "Q? Q? Required" -> "Q? Required")
+    let parts = raw.split('?').map(s => s.trim()).filter(Boolean);
+    let seen = new Set();
+    let cleaned = [];
+    for (let p of parts) {
+        if (!seen.has(p.toLowerCase())) {
+            cleaned.push(p);
+            seen.add(p.toLowerCase());
+        }
+    }
+    let result = cleaned.join('?');
+    if (raw.endsWith('?')) result += '?';
+    // Remove extra whitespace and duplicate 'Required'
+    result = result.replace(/(Required)(\s*Required)+/gi, 'Required');
+    return result.trim();
+}
+
+// Helper to add a new Q&A pair if not present, with answer and options, with deduplication
+async function addQAPairIfMissing(question, type, answer, options) {
     if (!question || !type) return;
+    question = cleanQuestionText(question);
     const qaPairs = await getQAPairs();
-    if (!qaPairs.some(q => q.question === question && q.type === type)) {
-        qaPairs.push({ question, answer: answer || '', type });
+    // Deduplicate: ignore case, whitespace, and repeated text
+    if (!qaPairs.some(q => cleanQuestionText(q.question).toLowerCase() === question.toLowerCase() && q.type === type)) {
+        const newPair = { question, answer: answer || '', type };
+        if (options && Array.isArray(options) && options.length > 0) {
+            newPair.options = options;
+        }
+        qaPairs.push(newPair);
         await new Promise(resolve => {
             chrome.runtime.sendMessage({ action: "setQAPairs", qaPairs }, () => resolve());
         });
@@ -637,9 +663,10 @@ async function fillApplicationForm() {
             if (input.labels && input.labels[0]) question = input.labels[0].innerText.trim();
             else if (input.placeholder) question = input.placeholder.trim();
             else if (input.getAttribute('aria-label')) question = input.getAttribute('aria-label').trim();
+            question = cleanQuestionText(question);
             let answer = null;
             if (question) {
-                answer = qaPairs.find(q => q.question === question && q.type === 'blank');
+                answer = qaPairs.find(q => cleanQuestionText(q.question) === question && q.type === 'blank');
                 answer = answer ? answer.answer : null;
             }
             if (!answer) {
@@ -659,11 +686,14 @@ async function fillApplicationForm() {
                 let question = '';
                 if (select.labels && select.labels[0]) question = select.labels[0].innerText.trim();
                 else if (select.getAttribute('aria-label')) question = select.getAttribute('aria-label').trim();
+                question = cleanQuestionText(question);
                 let answer = null;
                 if (question) {
-                    answer = qaPairs.find(q => q.question === question && q.type === 'choice');
+                    answer = qaPairs.find(q => cleanQuestionText(q.question) === question && q.type === 'choice');
                     answer = answer ? answer.answer : null;
                 }
+                // Extract all options for storage
+                const options = Array.from(select.options).map(opt => opt.text.trim()).filter(Boolean);
                 if (answer) {
                     const option = Array.from(select.options).find(opt => opt.text.trim() === answer);
                     if (option) select.value = option.value;
@@ -672,8 +702,8 @@ async function fillApplicationForm() {
                     select.value = select.options[1].value;
                     answer = select.options[1].text.trim();
                 }
-                // Auto-add if missing, with answer used
-                await addQAPairIfMissing(question, 'choice', answer);
+                // Auto-add if missing, with answer used and options
+                await addQAPairIfMissing(question, 'choice', answer, options);
                 select.dispatchEvent(new Event('change', { bubbles: true }));
                 await delay(300);
             }
@@ -683,12 +713,23 @@ async function fillApplicationForm() {
         for (const group of radioGroups) {
             const radios = group.querySelectorAll('input[type="radio"]');
             if (radios.length > 0 && !Array.from(radios).some(r => r.checked)) {
-                let question = group.querySelector('legend')?.innerText.trim() || group.textContent.trim();
+                // Only use legend as question, fallback to first label for first radio
+                let question = group.querySelector('legend')?.innerText.trim();
+                if (!question && radios[0]) {
+                    const label = group.querySelector(`label[for='${radios[0].id}']`);
+                    if (label) question = label.innerText.trim();
+                }
+                question = cleanQuestionText(question);
                 let answer = null;
                 if (question) {
-                    answer = qaPairs.find(q => q.question === question && q.type === 'radio');
+                    answer = qaPairs.find(q => cleanQuestionText(q.question) === question && q.type === 'radio');
                     answer = answer ? answer.answer : null;
                 }
+                // Extract all options for storage
+                const options = Array.from(radios).map(r => {
+                    const label = group.querySelector(`label[for='${r.id}']`);
+                    return label ? label.innerText.trim() : r.value;
+                }).filter(Boolean);
                 let radioToSelect = null;
                 if (answer) {
                     radioToSelect = Array.from(radios).find(r => r.value === answer || r.id === answer);
@@ -700,8 +741,8 @@ async function fillApplicationForm() {
                     radioToSelect.click();
                     answer = radioToSelect.value;
                 }
-                // Auto-add if missing, with answer used
-                await addQAPairIfMissing(question, 'radio', answer);
+                // Auto-add if missing, with answer used and options
+                await addQAPairIfMissing(question, 'radio', answer, options);
                 await delay(300);
             }
         }
@@ -712,9 +753,10 @@ async function fillApplicationForm() {
             let question = '';
             if (checkbox.labels && checkbox.labels[0]) question = checkbox.labels[0].innerText.trim();
             else if (checkbox.getAttribute('aria-label')) question = checkbox.getAttribute('aria-label').trim();
+            question = cleanQuestionText(question);
             let answer = null;
             if (question) {
-                answer = qaPairs.find(q => q.question === question && q.type === 'bool');
+                answer = qaPairs.find(q => cleanQuestionText(q.question) === question && q.type === 'bool');
                 answer = answer ? answer.answer : null;
             }
             if (answer && (answer === 'true' || answer === 'checked')) {
