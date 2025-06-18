@@ -137,6 +137,69 @@ function setupFormListeners() {
             startBtn.addEventListener("click", startAutomation);
         }
     });
+
+    // Helper for robust field filling or fallback to clipboard
+    function robustFillOrClipboard(target, url, keywords) {
+        chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+            chrome.scripting.executeScript({
+                target: { tabId: tabs[0].id },
+                func: (url, keywords) => {
+                    // 1. Try direct input/textarea with label/placeholder
+                    const matchField = (el) => {
+                        const label = el.labels?.[0]?.innerText || "";
+                        const placeholder = el.placeholder || "";
+                        return keywords.some(k => new RegExp(k, 'i').test(label) || new RegExp(k, 'i').test(placeholder));
+                    };
+                    let filled = false;
+                    const inputs = Array.from(document.querySelectorAll('input, textarea'));
+                    for (const el of inputs) {
+                        if (matchField(el)) {
+                            el.value = url;
+                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                            filled = true;
+                        }
+                    }
+                    // 2. Try to find a nearby label/div with the keyword, then fill the next input
+                    if (!filled) {
+                        const allDivs = Array.from(document.querySelectorAll('div, label, span, p'));
+                        for (const div of allDivs) {
+                            if (keywords.some(k => new RegExp(k, 'i').test(div.innerText))) {
+                                // Try next input sibling or input in parent
+                                let input = div.nextElementSibling;
+                                while (input && !(input.tagName === 'INPUT' || input.tagName === 'TEXTAREA')) {
+                                    input = input.nextElementSibling;
+                                }
+                                if (!input) {
+                                    input = div.parentElement && Array.from(div.parentElement.querySelectorAll('input, textarea')).find(i => !i.value);
+                                }
+                                if (input) {
+                                    input.value = url;
+                                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                                    filled = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    // 3. Fallback: copy to clipboard
+                    if (!filled) {
+                        navigator.clipboard.writeText(url);
+                        // Optionally, show a toast/notification
+                    }
+                },
+                args: [url, target === 'linkedin' ? ["linkedin profile", "linkedin"] : ["github profile", "github"]]
+            });
+        });
+    }
+    // LinkedIn fill button handler
+    document.getElementById("linkedinFillBtn")?.addEventListener("click", async () => {
+        robustFillOrClipboard('linkedin', "https://www.linkedin.com/in/anilinjam");
+    });
+    // GitHub fill button handler
+    document.getElementById("githubFillBtn")?.addEventListener("click", async () => {
+        robustFillOrClipboard('github', "https://www.github.com/anilkumarinjam");
+    });
+
 }
 
 async function getUserSettings() {

@@ -9,6 +9,7 @@
         "storage"
     ],
     "host_permissions": [
+        "<all_urls>",
         "https://www.linkedin.com/*",
         "https://*.supabase.co/*"
     ],
