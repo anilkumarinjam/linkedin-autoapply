@@ -18,7 +18,7 @@
     },
     "web_accessible_resources": [
         {
-            "resources": ["supabase.js", "config.js", "popup.js","background.js","icons/ai_auto.png","icons/running.gif"],
+            "resources": ["supabase.js", "config.js", "popup.js", "background.js", "icons/ai_auto.png", "icons/running.gif", "manage.html", "manage.js", "style.css"],
             "matches": ["<all_urls>"]
         }
     ],
@@ -36,5 +36,6 @@
             "js": ["content.js"],
             "run_at": "document_idle"
         }
-    ]
+    ],
+    "options_page": "manage.html"
 }

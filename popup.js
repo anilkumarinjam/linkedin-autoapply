@@ -23,10 +23,25 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (session) {
             showControls();
             await loadUserSettings();
-            await setupProfileManagement(); // Add this line
         }
         setupFormListeners();
-        
+        // Add Q&A Manager button handler
+        document.getElementById("openQAManagerBtn")?.addEventListener("click", () => {
+            chrome.tabs.create({ url: chrome.runtime.getURL("manage.html") });
+        });
+        // Attach sign out logic to new icon button
+        document.getElementById("signOut")?.addEventListener('click', async () => {
+            try {
+                const { error } = await supabaseClient.auth.signOut();
+                if (error) throw error;
+                chrome.storage.sync.remove(['userSettings', 'authToken']);
+                document.getElementById('authContainer').style.display = 'block';
+                document.getElementById('controls').style.display = 'none';
+                closePopupAndNotify("Signed out successfully", "info");
+            } catch (error) {
+                closePopupAndNotify("Failed to sign out: " + error.message, "error");
+            }
+        });
     } catch (error) {
         console.error("Initialization error:", error);
         alert("Failed to initialize. Please try again.");
@@ -116,6 +131,36 @@ function setupFormListeners() {
         }
     });
 
+    // Remove old status logic from main area
+    // Add new status indicator logic for bottom left
+    function updateStatusIndicator(isRunning) {
+        const statusEl = document.getElementById("status");
+        if (!statusEl) return;
+        statusEl.style.display = "flex";
+        if (isRunning) {
+            statusEl.innerHTML = '<span class="status-indicator-dot" style="background:#0077b5"></span> Running';
+            statusEl.style.color = '#0077b5';
+        } else {
+            statusEl.innerHTML = '<span class="status-indicator-dot"></span> Ready';
+            statusEl.style.color = '#4caf50';
+        }
+    }
+    // Listen for state updates from content script
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message.action === "updateState") {
+            updateStatusIndicator(message.isRunning);
+            const startBtn = document.getElementById("start");
+            const stopBtn = document.getElementById("stop");
+            if (message.isRunning) {
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+            } else {
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            }
+        }
+    });
+    // Initial status
     updateStatus();
     document.getElementById("start")?.addEventListener("click", startAutomation);
     document.getElementById("stop")?.addEventListener("click", stopAutomation);
@@ -227,13 +272,22 @@ async function loadUserSettings() {
         console.error("Error loading settings:", error);
         return;
     }
+    // Always include email from session
+    const userSettings = {
+        ...data,
+        email: session.user.email
+    };
     // Store settings in chrome.storage for content script access
-    chrome.storage.sync.set({ userSettings: data });
+    chrome.storage.sync.set({ userSettings });
 }
 
 function showControls() {
     document.getElementById("authContainer").style.display = "none";
     document.getElementById("controls").style.display = "block";
+    // Enable LinkedIn, GitHub, and Q&A Manager buttons
+    document.getElementById("linkedinFillBtn")?.removeAttribute("disabled");
+    document.getElementById("githubFillBtn")?.removeAttribute("disabled");
+    document.getElementById("openQAManagerBtn")?.removeAttribute("disabled");
 }
 
 // Function to start automation
@@ -279,151 +333,34 @@ function stopAutomation() {
     });
 }
 
-// Add listener for state updates from content script
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === "updateState") {
-        const statusEl = document.getElementById("status");
-        const startBtn = document.getElementById("start");
-        const stopBtn = document.getElementById("stop");
-        
-        if (message.isRunning) {
-            statusEl.innerText = "...Running";
-            statusEl.style.color = "#0077b5";
-            startBtn.disabled = true;
-            stopBtn.disabled = false;
-        } else {
-            statusEl.innerText = "Ready";
-            statusEl.style.color = "#4caf50";
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-        }
-    }
-});
-
-// Update the updateStatus function to handle errors better
+// Update the updateStatus function to use the new indicator
 function updateStatus() {
     chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
         if (tabs[0] && tabs[0].url.includes("linkedin.com")) {
             chrome.tabs.sendMessage(tabs[0].id, { action: "status" })
                 .then(response => {
                     if (response && typeof response.isRunning !== 'undefined') {
-                        const statusEl = document.getElementById("status");
                         const startBtn = document.getElementById("start");
                         const stopBtn = document.getElementById("stop");
-                        
                         if (response.isRunning) {
-                            statusEl.innerText = "...Running";
-                            statusEl.style.color = "#0077b5";
+                            document.getElementById("status").innerHTML = '<span class="status-indicator-dot" style="background:#0077b5"></span> Running';
+                            document.getElementById("status").style.color = '#0077b5';
                             startBtn.disabled = true;
                             stopBtn.disabled = false;
                         } else {
-                            statusEl.innerText = "Ready";
-                            statusEl.style.color = "#4caf50";
+                            document.getElementById("status").innerHTML = '<span class="status-indicator-dot"></span> Ready';
+                            document.getElementById("status").style.color = '#4caf50';
                             startBtn.disabled = false;
                             stopBtn.disabled = true;
                         }
+                        document.getElementById("status").style.display = 'flex';
                     }
                 })
                 .catch(error => {
-                    console.log("Error checking status:", error);
-                    // Handle the error gracefully
-                    const statusEl = document.getElementById("status");
-                    statusEl.innerText = "Ready";
-                    statusEl.style.color = "#4caf50";
+                    document.getElementById("status").style.display = 'none';
                 });
-        }
-    });
-}
-
-
-// Add these functions after your existing code
-
-async function setupProfileManagement() {
-    const toggleBtn = document.getElementById('toggleProfile');
-    const profileForm = document.getElementById('profileForm');
-    const saveBtn = document.getElementById('saveProfile');
-    const signOutBtn = document.getElementById('signOut');
-
-    // Load current settings
-    const settings = await loadUserSettings();
-    const userSettings = await getUserSettings();
-    if (userSettings) {
-        document.getElementById('updatePhone').value = userSettings.phone_number || '';
-        document.getElementById('updateAnswer').value = userSettings.default_answer || '';
-    }
-
-    // Toggle profile form
-    toggleBtn?.addEventListener('click', () => {
-        profileForm.style.display = profileForm.style.display === 'none' ? 'block' : 'none';
-    });
-
-    // Save profile changes
-    saveBtn?.addEventListener('click', async () => {
-        try {
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            if (!session) throw new Error('No session found');
-
-            const phoneNumber = document.getElementById('updatePhone').value;
-            const defaultAnswer = document.getElementById('updateAnswer').value;
-
-            // First check if settings exist
-            const { data: existingSettings } = await supabaseClient
-                .from('user_settings')
-                .select('*')
-                .eq('user_id', session.user.id)
-                .single();
-
-            let result;
-            if (existingSettings) {
-                // Update existing settings
-                result = await supabaseClient
-                    .from('user_settings')
-                    .update({
-                        phone_number: phoneNumber,
-                        default_answer: defaultAnswer
-                    })
-                    .eq('user_id', session.user.id);
-            } else {
-                // Insert new settings
-                result = await supabaseClient
-                    .from('user_settings')
-                    .insert([{
-                        user_id: session.user.id,
-                        phone_number: phoneNumber,
-                        default_answer: defaultAnswer
-                    }]);
-            }
-
-            if (result.error) throw result.error;
-            
-            alert('Settings updated successfully!');
-            profileForm.style.display = 'none';
-            
-            // Update chrome storage
-            chrome.storage.sync.set({ 
-                userSettings: { 
-                    phone_number: phoneNumber, 
-                    default_answer: defaultAnswer 
-                }
-            });
-            closePopupAndNotify("Settings saved successfully!", "success");
-        } catch (error) {
-            closePopupAndNotify("Failed to save settings: " + error.message, "error");
-        }
-    });
-
-    // Handle sign out
-    // Also clear the token on sign out
-    signOutBtn?.addEventListener('click', async () => {
-        try {
-            const { error } = await supabaseClient.auth.signOut();
-            if (error) throw error;
-            chrome.storage.sync.remove(['userSettings', 'authToken']); // Remove both
-            document.getElementById('authContainer').style.display = 'block';
-            document.getElementById('controls').style.display = 'none';
-            closePopupAndNotify("Signed out successfully", "info");
-        } catch (error) {
-            closePopupAndNotify("Failed to sign out: " + error.message, "error");
+        } else {
+            document.getElementById("status").style.display = 'none';
         }
     });
 }

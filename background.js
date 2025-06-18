@@ -73,6 +73,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         })();
         return true; // Keep message channel open
     }
+    // --- Q&A and User Settings Storage Messaging ---
+    // Q&A and user settings storage API
+    if (message.action === "getQAPairs") {
+        chrome.storage.sync.get(['qaPairs'], (result) => {
+            sendResponse({ qaPairs: result.qaPairs || [] });
+        });
+        return true;
+    }
+    if (message.action === "setQAPairs") {
+        chrome.storage.sync.set({ qaPairs: message.qaPairs }, () => {
+            sendResponse({ success: true });
+        });
+        return true;
+    }
+    if (message.action === "getUserSettings") {
+        chrome.storage.sync.get(['userSettings'], (result) => {
+            sendResponse({ userSettings: result.userSettings || null });
+        });
+        return true;
+    }
+    if (message.action === "setUserSettings") {
+        chrome.storage.sync.set({ userSettings: message.userSettings }, () => {
+            sendResponse({ success: true });
+        });
+        return true;
+    }
 });
 
 async function updateUserDailyCount(count, date) {

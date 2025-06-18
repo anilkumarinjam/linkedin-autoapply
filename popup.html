@@ -9,7 +9,14 @@
 <body>
     <div class="header">
         <img src="icons/icon.png" alt="LinkedIn Auto Apply" class="logo" />
-        <h2>LinkedIn Auto Apply</h2>
+        <span class="header-title">LinkedIn Auto Apply</span>
+        <button id="signOut" class="signout-icon-btn" title="Sign Out">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style="transform:rotate(180deg);" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="12" fill="#d35d5d"/>
+                <path d="M10 7V5a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3a2 2 0 0 1-2-2v-2" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M15 12H4m0 0l3-3m-3 3l3 3" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        </button>
     </div>
 
     <!-- Auth Container -->
@@ -38,34 +45,18 @@
         <!-- Application Controls -->
         <button id="start">Start Applying</button>
         <button id="stop" disabled>Stop</button>
-        <div id="status">Ready to apply</div>
-        
-        <!-- Bottom Controls Section -->
-        <div class="bottom-controls">
-            <button id="toggleProfile" class="profile-btn">Profile Settings</button>
-            <button id="signOut" class="signout-btn">Sign Out</button>
-        </div>
-
-        <!-- Profile Form (hidden by default) -->
-        <div id="profileForm" style="display: none;">
-            <div class="form-group">
-                <label for="updatePhone">Phone Number</label>
-                <input type="tel" id="updatePhone">
-            </div>
-            <div class="form-group">
-                <label for="updateAnswer">Years of Experience</label>
-                <input type="text" id="updateAnswer">
-            </div>
-            <button id="saveProfile" class="auth-btn">Save Changes</button>
-        </div>
     </div>
     
     <footer>
         LinkedIn job applications made easy
         <div style="display:flex;gap:8px;margin-top:10px;">
-            <button id="linkedinFillBtn" style="flex:1;background:#0077b5;color:#fff;padding:8px 0;border:none;border-radius:4px;font-weight:bold;cursor:pointer;">LinkedIn</button>
-            <button id="githubFillBtn" style="flex:1;background:#24292e;color:#fff;padding:8px 0;border:none;border-radius:4px;font-weight:bold;cursor:pointer;">GitHub</button>
+            <button id="linkedinFillBtn" disabled style="flex:1;background:#0077b5;color:#fff;padding:8px 0;border:none;border-radius:4px;font-weight:bold;cursor:pointer;">LinkedIn</button>
+            <button id="githubFillBtn" disabled style="flex:1;background:#24292e;color:#fff;padding:8px 0;border:none;border-radius:4px;font-weight:bold;cursor:pointer;">GitHub</button>
         </div>
+        <div style="margin-top:10px;">
+            <button id="openQAManagerBtn" disabled style="width:100%;background:#0a66c2;color:#fff;padding:8px 0;border:none;border-radius:4px;font-weight:bold;cursor:pointer;">Open Q&A Manager</button>
+        </div>
+        <div id="status" class="status-indicator" style="display:none;"></div>
     </footer>
     <script src="supabase.js"></script>
     <script src="config.js"></script>

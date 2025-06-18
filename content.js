@@ -40,32 +40,17 @@ async function handleStop() {
     
     chrome.runtime.sendMessage({ action: "updateState", isRunning: false });
 }
+
+// Helper to get user settings from background (via messaging)
 async function getUserSettings() {
     return new Promise((resolve) => {
-        try {
-            // Check if chrome.storage is available
-            if (!chrome?.storage?.sync) {
-                console.error("⚠️ Chrome storage API not available");
-                resolve(null);
-                return;
-            }
-
-            chrome.storage.sync.get(['userSettings'], (result) => {
-                if (chrome.runtime.lastError) {
-                    console.error("⚠️ Error accessing storage:", chrome.runtime.lastError);
-                    resolve(null);
-                    return;
-                }
-                resolve(result.userSettings || null);
-            });
-        } catch (error) {
-            console.error("⚠️ Error in getUserSettings:", error);
-            resolve(null);
-        }
+        chrome.runtime.sendMessage({ action: "getUserSettings" }, (response) => {
+            resolve(response?.userSettings || null);
+        });
     });
 }
 
-// Add this helper function to check authentication status
+// Add this helper function to check authentication
 async function checkAuthentication() {
     try {
         const settings = await getUserSettings();
@@ -593,6 +578,38 @@ const waitForElement = (selector, timeout = 5000) => {
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 
+// Helper to get Q&A pairs from background (via messaging)
+async function getQAPairs() {
+    return new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: "getQAPairs" }, (response) => {
+            resolve(response?.qaPairs || []);
+        });
+    });
+}
+
+// Helper to match a question (case-sensitive, full string)
+function findQAPair(question, type) {
+    return new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: "getQAPairs" }, (response) => {
+            const qaPairs = response?.qaPairs || [];
+            const match = qaPairs.find(q => q.question === question && (!type || q.type === type));
+            resolve(match ? match.answer : null);
+        });
+    });
+}
+
+// Helper to add a new Q&A pair if not present, with answer
+async function addQAPairIfMissing(question, type, answer) {
+    if (!question || !type) return;
+    const qaPairs = await getQAPairs();
+    if (!qaPairs.some(q => q.question === question && q.type === type)) {
+        qaPairs.push({ question, answer: answer || '', type });
+        await new Promise(resolve => {
+            chrome.runtime.sendMessage({ action: "setQAPairs", qaPairs }, () => resolve());
+        });
+    }
+}
+
 // Fill application form fields
 async function fillApplicationForm() {
     console.log("📝 Filling application form...");
@@ -601,7 +618,8 @@ async function fillApplicationForm() {
         console.log("⚠️ No user settings found");
         return false;
     }
-    
+    // Get Q&A pairs from storage
+    const qaPairs = await getQAPairs();
     // Get the active modal container to restrict our scope
     const modalContainer = document.querySelector('.jobs-easy-apply-content, .artdeco-modal__content, .ember-view');
     
@@ -614,152 +632,98 @@ async function fillApplicationForm() {
         // Handle text fields - restrict to modal
         const textInputs = modalContainer.querySelectorAll('input[type="text"]:not([value]), input[type="tel"]:not([value]), input[type="email"]:not([value])');
         for (const input of textInputs) {
-            if (input.value.trim()) {
-                console.log(`⏩ Skipping pre-filled field: ${input.name || input.id || 'unnamed field'}`);
-                continue;
+            if (input.value.trim()) continue;
+            let question = '';
+            if (input.labels && input.labels[0]) question = input.labels[0].innerText.trim();
+            else if (input.placeholder) question = input.placeholder.trim();
+            else if (input.getAttribute('aria-label')) question = input.getAttribute('aria-label').trim();
+            let answer = null;
+            if (question) {
+                answer = qaPairs.find(q => q.question === question && q.type === 'blank');
+                answer = answer ? answer.answer : null;
             }
-            const isPhoneField = 
-                input.id?.toLowerCase().includes('phone') || 
-                input.name?.toLowerCase().includes('phone') ||
-                input.getAttribute('aria-describedby')?.toLowerCase().includes('phone') ||
-                input.placeholder?.toLowerCase().includes('phone');
-
-            const isLocationField = 
-                input.id?.toLowerCase().includes('location') || 
-                input.id?.toLowerCase().includes('city') || 
-                input.name?.toLowerCase().includes('location') ||
-                input.getAttribute('aria-describedby')?.toLowerCase().includes('location') ||
-                input.placeholder?.toLowerCase().includes('location');
-
-            if (isLocationField) {
-                // Set value to Texas
-                input.value = "Texas";
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                await delay(1000); // Wait for dropdown to appear
-
-                // Wait for and click the first dropdown option
-                try {
-                    // Look for dropdown elements with common LinkedIn class names
-                    const dropdownOption = await waitForElement(
-                        '.jobs-location-typeahead__suggestion, .basic-typeahead__triggered-content li:first-child, .artdeco-typeahead__dropdown li:first-child',
-                        3000
-                    );
-                    
-                    if (dropdownOption) {
-                        dropdownOption.click();
-                        await delay(500);
-                    }
-                } catch (e) {
-                    console.log("⚠️ Could not select location dropdown option:", e);
-                }
-            } else {
-                // Handle other fields as before
-                input.value = isPhoneField ? userSettings.phone_number : userSettings.default_answer;
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                await delay(300);
+            if (!answer) {
+                const isPhoneField = input.id?.toLowerCase().includes('phone') || input.name?.toLowerCase().includes('phone') || input.placeholder?.toLowerCase().includes('phone');
+                answer = isPhoneField ? userSettings.phone_number : userSettings.default_answer;
             }
+            // Auto-add if missing, with answer used
+            await addQAPairIfMissing(question, 'blank', answer || input.value || '');
+            input.value = answer;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            await delay(300);
         }
         // Handle dropdowns - restrict to modal
         const selects = modalContainer.querySelectorAll('select:not([value])');
         for (const select of selects) {
             if (select.options.length > 1) {
-                if (select.value && select.value !== select.options[0].value) {
-                    console.log(`⏩ Skipping pre-selected dropdown: ${select.name || select.id || 'unnamed select'}`);
-                    continue;
+                let question = '';
+                if (select.labels && select.labels[0]) question = select.labels[0].innerText.trim();
+                else if (select.getAttribute('aria-label')) question = select.getAttribute('aria-label').trim();
+                let answer = null;
+                if (question) {
+                    answer = qaPairs.find(q => q.question === question && q.type === 'choice');
+                    answer = answer ? answer.answer : null;
                 }
-                // Get the question text from the closest label or parent fieldset
-                const questionText = (
-                    select.labels?.[0]?.textContent || 
-                    select.closest('fieldset')?.querySelector('legend')?.textContent ||
-                    select.closest('.form-group')?.querySelector('label')?.textContent ||
-                    select.getAttribute('aria-label') ||
-                    ''
-                ).toLowerCase();
-
-                const isSponsorship = questionText.includes('sponsor') || 
-                    questionText.includes('sponsorship') || 
-                    questionText.includes('work authorization') ||
-                    questionText.includes('visa') ||
-                    questionText.includes('green card') ||
-                    questionText.includes('citizen') ||
-                    questionText.includes('clearance');
-
-                // For sponsorship questions, try to find "No" option
-                if (isSponsorship) {
-                    console.log("📝 Sponsorship question detected, selecting No");
-                    // Try to find a "No" option
-                    const noOptionIndex = Array.from(select.options)
-                        .findIndex(option => option.text.toLowerCase().includes('no'));
-                    
-                    // If "No" option found, use it; otherwise use the last option
-                    select.value = noOptionIndex !== -1 ? 
-                        select.options[noOptionIndex].value : 
-                        select.options[select.options.length - 1].value;
+                if (answer) {
+                    const option = Array.from(select.options).find(opt => opt.text.trim() === answer);
+                    if (option) select.value = option.value;
+                    else select.value = select.options[1].value;
                 } else {
-                    // For non-sponsorship questions, select the first non-empty option
                     select.value = select.options[1].value;
+                    answer = select.options[1].text.trim();
                 }
-                
+                // Auto-add if missing, with answer used
+                await addQAPairIfMissing(question, 'choice', answer);
                 select.dispatchEvent(new Event('change', { bubbles: true }));
                 await delay(300);
             }
         }
-        
         // Handle radio buttons - restrict to modal
         const radioGroups = modalContainer.querySelectorAll('fieldset');
         for (const group of radioGroups) {
             const radios = group.querySelectorAll('input[type="radio"]');
             if (radios.length > 0 && !Array.from(radios).some(r => r.checked)) {
-                if (Array.from(radios).some(r => r.checked)) {
-                    console.log('⏩ Skipping pre-selected radio group');
-                    continue;
+                let question = group.querySelector('legend')?.innerText.trim() || group.textContent.trim();
+                let answer = null;
+                if (question) {
+                    answer = qaPairs.find(q => q.question === question && q.type === 'radio');
+                    answer = answer ? answer.answer : null;
                 }
-                // Get the question text to check for sponsorship
-                const questionText = group.textContent.toLowerCase() || '';
-                const isSponsorship = questionText.includes('sponsor') || 
-                                      questionText.includes('sponsorship') || 
-                                      questionText.includes('work authorization') ||
-                                      questionText.includes('visa')||
-                                      questionText.includes('green card')||
-                                      questionText.includes('citizen');
-                
-                if (isSponsorship) {
-                    // For sponsorship questions, try to find "No" option
-                    console.log("📝 Sponsorship question detected, selecting No");
-                    const noOption = Array.from(radios).find(r => 
-                        r.value.toLowerCase() === "no" || 
-                        r.id.toLowerCase().includes("no")
-                    );
-                    
-                    if (noOption) noOption.click();
-                    else radios[radios.length - 1].click(); // (often "No" is the second option)
-                } else {
-                    // For all other questions, try to find "Yes" option
-                    console.log("📝 Standard question, selecting Yes");
-                    const yesOption = Array.from(radios).find(r => 
-                        r.value.toLowerCase() === "yes" || 
-                        r.id.toLowerCase().includes("yes")
-                    );
-                    if (yesOption) yesOption.click();
-                    else radios[0].click();
+                let radioToSelect = null;
+                if (answer) {
+                    radioToSelect = Array.from(radios).find(r => r.value === answer || r.id === answer);
                 }
+                if (!radioToSelect) {
+                    radioToSelect = Array.from(radios).find(r => r.value.toLowerCase() === 'yes') || radios[0];
+                }
+                if (radioToSelect) {
+                    radioToSelect.click();
+                    answer = radioToSelect.value;
+                }
+                // Auto-add if missing, with answer used
+                await addQAPairIfMissing(question, 'radio', answer);
                 await delay(300);
             }
         }
-        
         // Handle checkboxes - restrict to modal
         const checkboxes = modalContainer.querySelectorAll('input[type="checkbox"]:not(:checked)');
         for (const checkbox of checkboxes) {
-            if (checkbox.checked || checkbox.name === "jobDetailsEasyApplyTopChoiceCheckbox") {
-                console.log(`⏩ Skipping pre-checked checkbox: ${checkbox.name || checkbox.id || 'unnamed checkbox'}`);
-                continue;
+            if (checkbox.checked || checkbox.name === "jobDetailsEasyApplyTopChoiceCheckbox") continue;
+            let question = '';
+            if (checkbox.labels && checkbox.labels[0]) question = checkbox.labels[0].innerText.trim();
+            else if (checkbox.getAttribute('aria-label')) question = checkbox.getAttribute('aria-label').trim();
+            let answer = null;
+            if (question) {
+                answer = qaPairs.find(q => q.question === question && q.type === 'bool');
+                answer = answer ? answer.answer : null;
             }
-            if (checkbox.name !== "jobDetailsEasyApplyTopChoiceCheckbox") {
+            if (answer && (answer === 'true' || answer === 'checked')) {
                 checkbox.click();
-                await delay(300);
             }
+            // Auto-add if missing, with answer used (true/false)
+            await addQAPairIfMissing(question, 'bool', answer || (checkbox.checked ? 'true' : 'false'));
+            await delay(300);
         }
-        
         console.log("✅ Form fields filled");
         return true; // Indicate success
     } catch (error) {

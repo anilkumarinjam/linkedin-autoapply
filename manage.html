@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Q&A Manager - LinkedIn Auto Apply</title>
+    <link rel="stylesheet" href="manage.css">
+    <!-- <link rel="stylesheet" href="style.css"> -->
+</head>
+<body>
+    <div class="container">
+        <h2>Manage Q&A Pairs</h2>
+        <div class="readonly-info" id="userInfo"></div>
+        <div class="tab-bar">
+            <button id="tab-radio" class="active">Radio</button>
+            <button id="tab-blank">Blank/Text</button>
+            <button id="tab-choice">Choices</button>
+            <button id="tab-bool">True/False</button>
+        </div>
+        <div id="qnaSections">
+            <div class="qna-section" id="section-radio"></div>
+            <div class="qna-section" id="section-blank" style="display:none"></div>
+            <div class="qna-section" id="section-choice" style="display:none"></div>
+            <div class="qna-section" id="section-bool" style="display:none"></div>
+        </div>
+    </div>
+    <script src="manage.js"></script>
+</body>
+</html>
