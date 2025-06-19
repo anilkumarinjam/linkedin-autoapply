@@ -192,92 +192,120 @@ function setupFormListeners() {
             chrome.scripting.executeScript({
                 target: { tabId: tabs[0].id },
                 func: async (url, keywords) => {
-                    // 1. Try direct input/textarea with label/placeholder
-                    const matchField = (el) => {
-                        const label = el.labels?.[0]?.innerText || "";
-                        const placeholder = el.placeholder || "";
-                        return keywords.some(k => new RegExp(k, 'i').test(label) || new RegExp(k, 'i').test(placeholder));
-                    };
-                    let filled = false;
-                    const inputs = Array.from(document.querySelectorAll('input, textarea'));
-                    for (const el of inputs) {
-                        if (matchField(el)) {
-                            el.value = url;
-                            el.dispatchEvent(new Event('input', { bubbles: true }));
-                            filled = true;
+                    // Recursively search for matching input/textarea in all shadow roots and main DOM
+                    function findAndFill(root) {
+                        let filled = false;
+                        // 1. Try direct input/textarea with label/placeholder
+                        const matchField = (el) => {
+                            const label = el.labels?.[0]?.innerText || "";
+                            const placeholder = el.placeholder || "";
+                            return keywords.some(k => new RegExp(k, 'i').test(label) || new RegExp(k, 'i').test(placeholder));
+                        };
+                        const inputs = Array.from(root.querySelectorAll('input, textarea'));
+                        for (const el of inputs) {
+                            if (matchField(el)) {
+                                el.value = url;
+                                el.dispatchEvent(new Event('input', { bubbles: true }));
+                                filled = true;
+                            }
                         }
-                    }
-                    // 2. Try to find a nearby label/div with the keyword, then fill the next input
-                    if (!filled) {
-                        const allDivs = Array.from(document.querySelectorAll('div, label, span, p'));
-                        for (const div of allDivs) {
-                            if (keywords.some(k => new RegExp(k, 'i').test(div.innerText))) {
-                                let input = div.nextElementSibling;
-                                while (input && !(input.tagName === 'INPUT' || input.tagName === 'TEXTAREA')) {
-                                    input = input.nextElementSibling;
-                                }
-                                if (!input) {
-                                    input = div.parentElement && Array.from(div.parentElement.querySelectorAll('input, textarea')).find(i => !i.value);
-                                }
-                                if (input) {
-                                    input.value = url;
-                                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                                    filled = true;
-                                    break;
+                        // 2. Try to find a nearby label/div with the keyword, then fill the next input
+                        if (!filled) {
+                            const allDivs = Array.from(root.querySelectorAll('div, label, span, p'));
+                            for (const div of allDivs) {
+                                if (keywords.some(k => new RegExp(k, 'i').test(div.innerText))) {
+                                    let input = div.nextElementSibling;
+                                    while (input && !(input.tagName === 'INPUT' || input.tagName === 'TEXTAREA')) {
+                                        input = input.nextElementSibling;
+                                    }
+                                    if (!input) {
+                                        input = div.parentElement && Array.from(div.parentElement.querySelectorAll('input, textarea')).find(i => !i.value);
+                                    }
+                                    if (input) {
+                                        input.value = url;
+                                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                                        filled = true;
+                                        break;
+                                    }
                                 }
                             }
                         }
-                    }
-                    // Always try to copy to clipboard, regardless of filled
-                    let copySuccess = false;
-                    // Try navigator.clipboard first
-                    try {
-                        await navigator.clipboard.writeText(url);
-                        copySuccess = true;
-                    } catch (e) {
-                        // Fallback: use textarea + execCommand
-                        try {
-                            const textarea = document.createElement('textarea');
-                            textarea.value = url;
-                            textarea.setAttribute('readonly', '');
-                            textarea.style.position = 'absolute';
-                            textarea.style.left = '-9999px';
-                            document.body.appendChild(textarea);
-                            textarea.select();
-                            const successful = document.execCommand('copy');
-                            document.body.removeChild(textarea);
-                            copySuccess = successful;
-                        } catch (err) {
-                            copySuccess = false;
+                        // 3. Recursively search shadow roots
+                        if (!filled) {
+                          const allElems = Array.from(root.querySelectorAll('*'));
+                          for (const elem of allElems) {
+                            if (elem.shadowRoot) {
+                              if (findAndFill(elem.shadowRoot)) {
+                                filled = true;
+                                break;
+                              }
+                            }
+                          }
                         }
-                    }
-                    // Notify user if copy failed or succeeded but not filled
-                    if (!filled && !copySuccess) {
-                        alert('Could not fill or copy the URL to clipboard. Please copy manually.');
-                    } else if (!filled && copySuccess) {
-                        alert('URL copied to clipboard. Paste it where needed.');
-                    }
+                        return filled;
+                      }
+                      // Start from document
+                      findAndFill(document);
+                      // Always try to copy to clipboard, regardless of filled
+                      try {
+                        await navigator.clipboard.writeText(url);
+                      } catch (e) {
+                        try {
+                          const textarea = document.createElement('textarea');
+                          textarea.value = url;
+                          textarea.setAttribute('readonly', '');
+                          textarea.style.position = 'absolute';
+                          textarea.style.left = '-9999px';
+                          document.body.appendChild(textarea);
+                          textarea.select();
+                          document.execCommand('copy');
+                          document.body.removeChild(textarea);
+                        } catch (err) {}
+                      }
+                      // No alerts or popups, silent fail/pass
                 },
                 args: [url, target === 'linkedin' ? ["linkedin profile", "linkedin"] : ["github profile", "github"]]
             });
         });
     }
     // LinkedIn fill button handler
-    document.getElementById("linkedinFillBtn")?.addEventListener("click", async () => {
+    document.getElementById("linkedinFillBtn")?.addEventListener("click", async function handleLinkedinClick() {
+        const btn = this;
+        const originalHTML = btn.innerHTML;
         const userSettings = await getUserSettings();
         const url = userSettings?.linkedin_url;
         if (url) {
             robustFillOrClipboard('linkedin', url);
+            // Show feedback
+            btn.innerHTML = '<svg style="vertical-align:middle;margin-right:4px;" width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 7L9.5 17.5L4 12" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Copied!';
+            btn.style.transition = 'background 0.2s';
+            btn.style.background = '#43a047';
+            setTimeout(() => {
+                btn.innerHTML = originalHTML;
+                btn.style.background = '#0077b5';
+                window.close();
+            }, 1000);
         } else {
             alert("LinkedIn URL not found in your profile. Please update your settings.");
         }
     });
     // GitHub fill button handler
-    document.getElementById("githubFillBtn")?.addEventListener("click", async () => {
+    document.getElementById("githubFillBtn")?.addEventListener("click", async function handleGithubClick() {
+        const btn = this;
+        const originalHTML = btn.innerHTML;
         const userSettings = await getUserSettings();
         const url = userSettings?.github_url;
         if (url) {
             robustFillOrClipboard('github', url);
+            // Show feedback
+            btn.innerHTML = '<svg style="vertical-align:middle;margin-right:4px;" width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 7L9.5 17.5L4 12" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Copied!';
+            btn.style.transition = 'background 0.2s';
+            btn.style.background = '#43a047';
+            setTimeout(() => {
+                btn.innerHTML = originalHTML;
+                btn.style.background = '#24292e';
+                window.close();
+            }, 1000);
         } else {
             alert("GitHub URL not found in your profile. Please update your settings.");
         }
